@@ -12,6 +12,7 @@ miss=()
 need python3 python; need g++ gcc
 if ((${#miss[@]})); then echo "Не хватает пакетов: ${miss[*]}"; echo "  Arch/CachyOS: sudo pacman -S ${miss[*]}"; exit 1; fi
 command -v clangd >/dev/null || echo "clangd не найден — автодополнения C++ не будет (sudo pacman -S clang)"
+python3 -c "import jedi" 2>/dev/null || echo "jedi не найден — автодополнения Python не будет (sudo pacman -S python-jedi)"
 command -v cmake >/dev/null || echo "cmake не найден — проекты C++ с CMakeLists.txt не соберутся (sudo pacman -S cmake)"
 
 mkdir -p "$D/tests" "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/org.kde.syntax-highlighting/themes"

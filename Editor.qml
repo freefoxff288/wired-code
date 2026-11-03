@@ -225,10 +225,10 @@ Item {
     readonly property bool compOpen: compShown.length > 0 && area.activeFocus
     function closeComp() { compStart = -1; comps = []; compSel = 0; compSeq++; }
     function maybeComplete(force) {
-        if (!app.cfg.complete || lang !== "cpp" || !path || !app.lspPort) return;
+        if (!path || !app.canComplete(lang)) return;
         const p = area.cursorPosition, l = lineOf(p), before = area.text.slice(starts[l], p);
         const m = before.match(/[A-Za-z_]\w*$/), word = m ? m[0] : "", lead = before.slice(0, before.length - word.length);
-        const member = /(\.|->|::)$/.test(lead);
+        const member = lang === "python" ? /\.$/.test(lead) : /(\.|->|::)$/.test(lead);
         if (!force && !(word.length >= 2 || member) || /^\s*#\s*include/.test(before) && !force) { closeComp(); return; }
         if (!force && /^[0-9]/.test(word)) { closeComp(); return; }
         compTimer.restart();
@@ -238,7 +238,7 @@ Item {
         onTriggered: {
             const p = area.cursorPosition, l = ed.lineOf(p), seq = ++ed.compSeq;
             const before = area.text.slice(ed.starts[l], p), m = before.match(/[A-Za-z_]\w*$/);
-            ed.app.lspComplete(ed.path, area.text, l, p - ed.starts[l], items => {
+            ed.app.lspComplete(ed.lang, ed.path, area.text, l, p - ed.starts[l], items => {
                 if (seq !== ed.compSeq || area.cursorPosition !== p) return;   // пока ждали ответ, курсор ушёл
                 const st = items.length && items[0].start >= 0 ? ed.starts[l] + items[0].start : p - (m ? m[0].length : 0);
                 ed.comps = items; ed.compSel = 0; ed.compStart = items.length ? st : -1;

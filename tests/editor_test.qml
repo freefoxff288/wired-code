@@ -8,7 +8,7 @@ Item {
                property bool lineNumbers: true; property bool curLine: true; property bool autoClose: true; property bool anim: false }
     Item { id: palM; property color bg: "#000"; property color panel: "#111"; property color head: "#222"; property color btn: "#333"; property color text: "#eee"
            property color dim: "#888"; property color acc: "#68f"; property color light: "#9bf"; property color sel: "#35e"; property color faint: "#666" }
-    QtObject { id: appM; property string mono: "monospace"; property var cfg: cfgM; property var pal: palM; property var th: ({ scheme: "Wired" }); function zoom(d) {} }
+    QtObject { id: appM; property string mono: "monospace"; property var cfg: cfgM; property var pal: palM; property var th: ({ scheme: "Wired" }); function zoom(d) {} function canComplete(l) { return false; } }
     Editor { id: ed; app: appM; title: "t.cpp"; anchors.fill: parent }
 
     property int fails: 0

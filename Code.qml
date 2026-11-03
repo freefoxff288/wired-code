@@ -353,23 +353,25 @@ Window {
         });
     }
 
-    // ══════ автодополнение: clangd через мост lsp.py (HTTP на 127.0.0.1 с токеном) ══════
+    // ══════ автодополнение: мост lsp.py (HTTP на 127.0.0.1 с токеном) — C++ через clangd, Python через jedi ══════
     property string lspFile: ""
     property int lspPort: 0
     property string lspToken: ""
+    property var lspLangs: []               // что умеет мост: "cpp", "python"
+    function canComplete(lang) { return !!lspPort && cfg.complete && lspLangs.indexOf(lang) >= 0; }
     Timer {   // мост стартует пару секунд — ждём файл с портом
         interval: 400; repeat: true; running: !!win.lspFile && !win.lspPort
         onTriggered: {
             const x = new XMLHttpRequest();
             x.onreadystatechange = () => {
                 if (x.readyState !== XMLHttpRequest.DONE) return;
-                const m = (x.responseText || "").match(/^(\d+) (\w+)/);
-                if (m) { win.lspToken = m[2]; win.lspPort = +m[1]; }
+                const m = (x.responseText || "").match(/^(\d+) (\w+) ?([\w,]*)/);
+                if (m) { win.lspToken = m[2]; win.lspLangs = m[3] ? m[3].split(",") : []; win.lspPort = +m[1]; }
             };
             x.open("GET", "file://" + win.lspFile); x.send();
         }
     }
-    function lspComplete(path, text, line, col, cb) {
+    function lspComplete(lang, path, text, line, col, cb) {
         if (!lspPort) return;
         const x = new XMLHttpRequest();
         x.onreadystatechange = () => {
@@ -379,7 +381,7 @@ Window {
         };
         x.open("POST", "http://127.0.0.1:" + lspPort + "/complete");
         x.setRequestHeader("X-Token", lspToken); x.setRequestHeader("Content-Type", "application/json");
-        x.send(JSON.stringify({ path: path, text: text, line: line, col: col }));
+        x.send(JSON.stringify({ lang: lang, path: path, text: text, line: line, col: col }));
     }
 
     // ══════ быстрый переход к файлу (Ctrl+P) ══════
@@ -1031,7 +1033,7 @@ Window {
                 anchors.right: parent.right; anchors.rightMargin: 14; height: parent.height; spacing: 16
                 Text { id: savedTxt; anchors.verticalCenter: parent.verticalCenter; font.family: win.mono; font.pixelSize: cfg.uiSize - 1; color: pal.light; text: "✓ сохранено"; opacity: 0 }
                 Text { anchors.verticalCenter: parent.verticalCenter; font.family: win.mono; font.pixelSize: cfg.uiSize - 1; color: pal.faint
-                       text: (win.lspPort && cfg.complete ? "clangd ● · " : "") + "пробелы: " + cfg.tabWidth + " · UTF-8 · " + cfg.std }
+                       text: (status.e && win.canComplete(status.e.lang) ? (status.e.lang === "cpp" ? "clangd" : "jedi") + " ● · " : "") + "пробелы: " + cfg.tabWidth + " · UTF-8 · " + cfg.std }
             }
             SequentialAnimation {
                 id: savedFx
@@ -1101,7 +1103,7 @@ Window {
                 Row2 { label: "отступ"; Chips { value: cfg.tabWidth; options: [[2, "2"], [4, "4"], [8, "8"]]; onPicked: v => cfg.tabWidth = v } }
                 Row2 { label: "стандарт C++"; Chips { value: cfg.std; options: [["c++17", "17"], ["c++20", "20"], ["c++23", "23"]]; onPicked: v => { cfg.std = v; win.check(win.curEd); } } }
                 Row2 { label: "закрывать скобки и кавычки"; Toggle { checked: cfg.autoClose; onToggled: v => cfg.autoClose = v } }
-                Row2 { label: "автодополнение (clangd)"; Toggle { checked: cfg.complete; onToggled: v => cfg.complete = v } }
+                Row2 { label: "автодополнение (clangd / jedi)"; Toggle { checked: cfg.complete; onToggled: v => cfg.complete = v } }
                 Row2 { label: "ошибки на лету"; Toggle { checked: cfg.liveCheck; onToggled: v => { cfg.liveCheck = v; win.check(win.curEd); } } }
                 Row2 { label: "скрытые файлы в проекте"; Toggle { checked: cfg.hidden; onToggled: v => cfg.hidden = v } }
             }

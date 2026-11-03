@@ -12,7 +12,7 @@
 
 - **Подсветка** C++, Python и ещё ~300 языков (KSyntaxHighlighting) в цветах пяти тем Wired: ключевые слова, функции, `print` / `std::cout`, строки, числа — разными цветами
 - **Ошибки на лету**: через секунду после набора файл проверяется (`g++ -fsyntax-only` для C++, разбор синтаксиса для Python) — метки на полях, текст ошибки в строке состояния, **F8** — к следующей
-- **Автодополнение C++** через clangd: после `.`, `->`, `::` или двух букв; у функций сами ставятся скобки
+- **Автодополнение** C++ через clangd (после `.`, `->`, `::` или двух букв) и Python через jedi (после `.` или двух букв); у функций сами ставятся скобки
 - **Проекты**: дерево файлов, новый проект C++ (CMake) или Python в один клик, переименование, удаление в корзину, **Ctrl+P** — найти файл
 - **Запуск** во встроенном терминале: **F5** — собрать и запустить (CMake-проект целиком или один `.cpp` через `g++ -Wall -g`, `.py` через `python3`), **Shift+F5** — стоп
 - **Хоткеи**, привычные по другим редакторам: Ctrl+/ комментарий, Ctrl+D дублировать, Alt+↑/↓ двигать строки, Ctrl+F / Ctrl+H поиск и замена, Ctrl+G к строке… Полный список — **F1**
@@ -23,13 +23,13 @@
 ## Установка (Arch / CachyOS, KDE Plasma 6)
 
 ```sh
-sudo pacman -S qt6-declarative qmltermwidget syntax-highlighting python gcc cmake clang
+sudo pacman -S qt6-declarative qmltermwidget syntax-highlighting python gcc cmake clang python-jedi
 git clone https://github.com/freefoxff288/wired-code
 cd wired-code && ./install.sh
 ```
 
 Запуск — из меню приложений или `wired-code [файл|папка]`. Всё ставится в домашнюю папку, без root.
-`clang` нужен только для автодополнения, `cmake` — для проектов с `CMakeLists.txt`.
+`clang` и `python-jedi` нужны только для автодополнения C++ и Python, `cmake` — для проектов с `CMakeLists.txt`.
 
 ## Как устроено
 
@@ -38,12 +38,12 @@ cd wired-code && ./install.sh
 | `Code.qml` | окно: вкладки, проект, терминал, запуск, проверка ошибок, панели, хоткеи |
 | `Editor.qml` | один открытый файл: текст, подсветка, поля, правки, поиск, автодополнение |
 | `TreeNode.qml` | дерево проекта |
-| `lsp.py` | мост к clangd: QML не умеет говорить с процессом по stdin/stdout, поэтому мост отвечает редактору по HTTP на `127.0.0.1` со случайным токеном и завершается вместе с окном |
+| `lsp.py` | мост автодополнения (clangd для C++, jedi для Python): QML не умеет говорить с процессом по stdin/stdout, поэтому мост отвечает редактору по HTTP на `127.0.0.1` со случайным токеном и завершается вместе с окном |
 | `themes.js`, `syntax-themes/`, `colorschemes/` | палитры интерфейса, подсветки кода и терминала |
 
 Настройки — `~/.config/wired-code.conf`.
 
-Проверки: `QT_QPA_PLATFORM=offscreen qml tests/editor_test.qml` (правка текста, автодополнение, сохранение) и `python3 lsp.py --test` (clangd).
+Проверки: `QT_QPA_PLATFORM=offscreen qml tests/editor_test.qml` (правка текста, автодополнение, сохранение) и `python3 lsp.py --test` (clangd и jedi).
 
 Часть рабочего стола [Wired](https://github.com/freefoxff288) — если он установлен, тема редактора следует за темой всего стола.
 
