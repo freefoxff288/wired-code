@@ -283,6 +283,7 @@ Window {
             else t.send("\x15" + cmd + "\r");
         }
         else pending = cmd;
+        Qt.callLater(() => termLoader.item && termLoader.item.focusTerm());   // чтобы сразу вводить в std::cin / input()
     }
     function stop() { if (termLoader.item) termLoader.item.send("\x03"); }
     Timer { id: runLater; property string cmd; interval: 350; onTriggered: if (termLoader.item) termLoader.item.send("\x15" + cmd + "\r") }
@@ -963,6 +964,7 @@ Window {
                                     session: QMLTermSession { id: ses; initialWorkingDirectory: cfg.project || win.home; onFinished: { termLoader.active = false; termPanel.open = false; } }
                                     Component.onCompleted: ses.startShellProgram()
                                     Keys.onPressed: e => { if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_J) { termPanel.open = false; win.focusEd(); e.accepted = true; } }
+                                    TapHandler { onPressedChanged: if (pressed) term.forceActiveFocus() }   // сам виджет фокус по клику не берёт
                                 }
                                 Timer {   // шелл загрузился → можно слать ожидающую команду
                                     interval: 150; repeat: true; running: !tw.ready
