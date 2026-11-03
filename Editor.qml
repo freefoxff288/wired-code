@@ -1,6 +1,7 @@
 // Один открытый файл в Wired Code: текст с подсветкой (KSyntaxHighlighting, темы Wired), номера строк, текущая строка,
 // парные скобки, поиск, ошибки компилятора на полях. Правки кода (отступы, комментарии, перенос строк) — функции ниже,
 // их зовут хоткеи из Code.qml; набор (Tab, Enter, скобки, Backspace) обрабатывается здесь же в Keys.
+// Ещё здесь: сворачивание блоков, несколько курсоров, шаблоны (сниппеты), подсказка параметров и описание под мышью.
 import QtQuick
 import org.kde.syntaxhighlighting
 
@@ -14,12 +15,13 @@ Item {
                                  : /\.(py|pyw)$/i.test(name) ? "python" : "text"
     readonly property string comment: lang === "python" || /\.(sh|cmake|txt|toml|ya?ml|conf)$/i.test(name) || name === "CMakeLists.txt" ? "#" : "//"
     readonly property alias area: area
-    readonly property alias text: area.text
+    // настоящий текст файла: свёрнутые блоки в area заменены метками (см. «сворачивание»)
+    readonly property string text: area.text.indexOf("\uFDDF") >= 0 ? expand(area.text) : area.text
     property string saved: ""
     property bool loaded: path === ""
-    readonly property bool dirty: loaded && area.text !== saved
-    property var starts: [0]                  // позиции начала строк
-    readonly property int lineCount: starts.length
+    readonly property bool dirty: loaded && text !== saved
+    property var starts: [0]                  // позиции начала строк (в area, то есть со свёрнутыми блоками)
+    readonly property int lineCount: realLines
     property int curLine: 1
     property int curCol: 1
     readonly property int selLen: area.selectionEnd - area.selectionStart
@@ -47,7 +49,7 @@ Item {
     }
     // запись и сверка: XHR о неудаче записи не сообщает, поэтому файл перечитывается и сравнивается
     function save(done) {
-        const t = area.text, p = path;
+        const t = text, p = path;
         const w = new XMLHttpRequest();
         w.onreadystatechange = () => {   // читать только когда запись закончилась — иначе прочтётся старый файл
             if (w.readyState !== XMLHttpRequest.DONE) return;
@@ -69,7 +71,50 @@ Item {
         let i = -1;
         while ((i = t.indexOf("\n", i + 1)) !== -1) s.push(i + 1);
         starts = s;
+        const marks = [];
+        if (t.indexOf("\uFDDF") >= 0) { const re = /\uFDDF[\uE000-\uF8FF]/g; let m; while ((m = re.exec(t))) marks.push(m.index); }
+        foldMarks = marks;
+        if (marks.length) {   // номер настоящей строки для каждой видимой
+            const add = marks.map(p => (expand(t.substr(p, 2)).match(/\n/g) || []).length), map = [];
+            let extra = 0, k = 0;
+            for (let j = 0; j < s.length; j++) { while (k < marks.length && marks[k] < s[j]) extra += add[k++]; map.push(j + extra); }
+            while (k < marks.length) extra += add[k++];
+            lineMap = map; realLines = s.length + extra;
+        } else { lineMap = []; realLines = s.length; }
         updCursor();
+    }
+    function realLine(i) { return lineMap.length ? (lineMap[i] === undefined ? i : lineMap[i]) : i; }
+    function dispLine(r) {   // видимая строка для настоящей (строка внутри свёрнутого блока → строка с меткой)
+        if (!lineMap.length) return Math.max(0, Math.min(starts.length - 1, r));
+        let lo = 0, hi = lineMap.length - 1;
+        while (lo < hi) { const m = (lo + hi + 1) >> 1; if (lineMap[m] <= r) lo = m; else hi = m - 1; }
+        return lo;
+    }
+    function lspPos(p) {   // позиция в area → [строка, столбец] настоящего текста (для clangd/jedi)
+        const l = lineOf(p);
+        if (!foldMarks.length) return [l, p - starts[l]];
+        let r = p;
+        for (const m of foldMarks) if (m < p) r += expand(area.text.substr(m, 2)).length - 2;
+        const t = text, ls = t.lastIndexOf("\n", r - 1) + 1;
+        return [(t.slice(0, r).match(/\n/g) || []).length, r - ls];
+    }
+    function setText(t) {   // заменить весь текст (формат, переименование): меняется только отличающаяся середина
+        unfoldAll();
+        const o = area.text;
+        if (o === t) return;
+        let a = 0; while (a < o.length && a < t.length && o[a] === t[a]) a++;
+        let b = 0; while (b < o.length - a && b < t.length - a && o[o.length - 1 - b] === t[t.length - 1 - b]) b++;
+        const c = area.cursorPosition, y = flick.contentY;
+        area.remove(a, o.length - b); area.insert(a, t.slice(a, t.length - b));
+        area.cursorPosition = c <= a ? c : c >= o.length - b ? c + t.length - o.length : Math.min(c, t.length - b);
+        flick.contentY = y;
+    }
+    function wordAt(p) {   // [начало, конец] слова вокруг позиции
+        const t = area.text;
+        let a = p, b = p;
+        while (a > 0 && /\w/.test(t[a - 1])) a--;
+        while (b < t.length && /\w/.test(t[b])) b++;
+        return [a, b];
     }
     function lineOf(pos) {   // номер строки (с 0) по позиции, двоичный поиск
         let lo = 0, hi = starts.length - 1;
@@ -77,8 +122,9 @@ Item {
         return lo;
     }
     function lineEnd(i) { return i + 1 < starts.length ? starts[i + 1] - 1 : area.text.length; }
-    function updCursor() { const l = lineOf(area.cursorPosition); curLine = l + 1; curCol = area.cursorPosition - starts[l] + 1; }
-    function gotoLine(n, col) {
+    function updCursor() { const l = lineOf(area.cursorPosition); curLine = realLine(l) + 1; curCol = area.cursorPosition - starts[l] + 1; }
+    function gotoLine(n, col) {   // n — настоящая строка; свёрнутое разворачивается
+        unfoldAll();
         const l = Math.max(0, Math.min(starts.length - 1, n - 1));
         area.cursorPosition = Math.min(lineEnd(l), starts[l] + Math.max(0, (col || 1) - 1));
         area.forceActiveFocus(); center();
@@ -153,6 +199,230 @@ Item {
         else { const e = lineEnd(l); area.insert(e, "\n" + ind); area.cursorPosition = e + 1 + ind.length; }
     }
 
+    // ── сворачивание: блок заменяется в area меткой «\uFDDF + ключ», сам текст хранится в foldMap[ключ].
+    // Настоящий текст (ed.text) собирается обратно функцией expand, поэтому сохранение, проверка и clangd видят весь файл.
+    // Ключи не удаляются из foldMap — Ctrl+Z может вернуть старую метку, и её текст должен найтись.
+    property var foldMap: ({})
+    property int foldN: 0
+    property var foldMarks: []                // позиции меток в area
+    property var lineMap: []                  // видимая строка → настоящая (пусто — ничего не свёрнуто)
+    property int realLines: 1
+    function expand(t) {
+        for (let i = 0; i < 30 && t.indexOf("\uFDDF") >= 0; i++) t = t.replace(/\uFDDF([\uE000-\uF8FF])/g, (m, c) => foldMap[c] || "");
+        return t.replace(/\uFDDF/g, "");   // одинокая метка (её половину стёрли) — просто убрать
+    }
+    function foldable(l) {
+        const line = area.text.slice(starts[l], lineEnd(l));
+        return lang === "python" ? /:\s*(#.*)?$/.test(line) : /\{\s*(\/\/.*)?$/.test(line);
+    }
+    function foldRange(l) {   // что прятать для строки l: [от, до] в area или null
+        const t = area.text, ls = starts[l], le = lineEnd(l), line = t.slice(ls, le);
+        if (lang === "python") {   // блок — строки ниже с большим отступом
+            if (!/:\s*(#.*)?$/.test(line)) return null;
+            const ind = line.match(/^\s*/)[0].length;
+            let b = l;
+            for (let k = l + 1; k < starts.length; k++) {
+                const s = t.slice(starts[k], lineEnd(k));
+                if (!s.trim()) continue;
+                if (s.match(/^\s*/)[0].length <= ind) break;
+                b = k;
+            }
+            return b > l ? [le, lineEnd(b)] : null;
+        }
+        const o = line.lastIndexOf("{");
+        if (o < 0) return null;
+        for (let i = ls + o, depth = 0; i < t.length; i++) {
+            if (t[i] === "{") depth++;
+            else if (t[i] === "}" && --depth === 0) return lineOf(i) > l ? [ls + o + 1, i] : null;
+        }
+        return null;
+    }
+    function fold(l) {
+        const r = foldRange(l);
+        if (!r) return false;
+        // shortcut: ключей 6400 — после стольких сворачиваний одного файла за сеанс они пойдут по кругу
+        const k = String.fromCharCode(0xE000 + foldN++ % 6400), c = area.cursorPosition;
+        foldMap[k] = area.text.slice(r[0], r[1]);
+        area.remove(r[0], r[1]); area.insert(r[0], "\uFDDF" + k);
+        area.cursorPosition = c > r[0] && c <= r[1] ? r[0] + 2 : c > r[1] ? c - (r[1] - r[0]) + 2 : c;
+        return true;
+    }
+    function unfold(p) {
+        const h = foldMap[area.text[p + 1]] || "", c = area.cursorPosition;
+        area.remove(p, p + 2); area.insert(p, h);
+        area.cursorPosition = c >= p + 2 ? c + h.length - 2 : c;
+    }
+    function unfoldAll() { for (let n = 0; n < 30 && foldMarks.length; n++) for (const m of foldMarks.slice().reverse()) unfold(m); }
+    function toggleFold() {   // Ctrl+Shift+[ : свернуть блок, в котором курсор (или развернуть свёрнутый на этой строке)
+        const p = area.cursorPosition, l = lineOf(p);
+        const m = foldMarks.find(x => x >= starts[l] && x <= lineEnd(l));
+        if (m !== undefined) { unfold(m); return; }
+        for (let k = l; k >= 0 && k > l - 3000; k--) { const r = foldRange(k); if (r && r[1] >= p) { fold(k); return; } }
+    }
+    function foldAll() { for (let k = starts.length - 1; k >= 0; k--) if (foldable(k) && /^\S/.test(area.text.slice(starts[k], lineEnd(k)))) fold(k); }
+
+    // ── шаблоны: слово + Tab в начале строки. ${1:текст} — поле (Tab — к следующему), $0 — где курсор окажется в конце ──
+    readonly property var snippets: lang === "python" ? {
+        main: "def main():\n\t${1:pass}\n\n\nif __name__ == \"__main__\":\n\tmain()",
+        def: "def ${1:name}(${2}):\n\t${0:pass}",
+        class: "class ${1:Name}:\n\tdef __init__(self${2}):\n\t\t${0:pass}",
+        for: "for ${1:i} in range(${2:n}):\n\t${0:pass}",
+        forin: "for ${1:x} in ${2:items}:\n\t${0:pass}",
+        if: "if ${1:cond}:\n\t${0:pass}",
+        ife: "if ${1:cond}:\n\t${2:pass}\nelse:\n\t${0:pass}",
+        while: "while ${1:cond}:\n\t${0:pass}",
+        try: "try:\n\t${1:pass}\nexcept ${2:Exception} as e:\n\t${0:print(e)}",
+        pr: "print(${0})",
+        inp: "${1:x} = int(input())$0"
+    } : lang === "cpp" ? {
+        main: "int main() {\n\t$0\n\treturn 0;\n}",
+        inc: "#include <${1:iostream}>$0",
+        for: "for (int i = 0; i < ${1:n}; i++) {\n\t$0\n}",
+        forr: "for (auto& ${1:x} : ${2:v}) {\n\t$0\n}",
+        while: "while (${1:cond}) {\n\t$0\n}",
+        if: "if (${1:cond}) {\n\t$0\n}",
+        ife: "if (${1:cond}) {\n\t$2\n} else {\n\t$0\n}",
+        fn: "${1:void} ${2:name}(${3}) {\n\t$0\n}",
+        class: "class ${1:Name} {\npublic:\n\t$0\n};",
+        struct: "struct ${1:Name} {\n\t$0\n};",
+        cout: "std::cout << ${1} << std::endl;$0",
+        cin: "std::cin >> ${1:x};$0",
+        vec: "std::vector<${1:int}> ${2:v};$0"
+    } : ({})
+    property var snip: []                     // оставшиеся поля шаблона: {fromEnd, len} — отсчёт от конца текста не сдвигается, пока правишь поле выше
+    function snippetWord() {   // слово перед курсором, если перед ним на строке только пробелы, и для него есть шаблон
+        const p = area.cursorPosition, before = area.text.slice(starts[lineOf(p)], p), m = before.match(/^\s*(\w+)$/);
+        return m && snippets[m[1]] ? m[1] : "";
+    }
+    function expandSnippet(word) {
+        const p = area.cursorPosition, s0 = p - word.length, ind = area.text.slice(starts[lineOf(p)], p).match(/^\s*/)[0];
+        const src = snippets[word].replace(/\t/g, unit).replace(/\n/g, "\n" + ind), re = /\$\{(\d+)(?::([^}]*))?\}|\$(\d+)/g, stops = [];
+        let out = "", last = 0, m;
+        while ((m = re.exec(src))) {
+            out += src.slice(last, m.index);
+            stops.push({ n: +(m[1] || m[3]), at: out.length, len: (m[2] || "").length });
+            out += m[2] || ""; last = re.lastIndex;
+        }
+        out += src.slice(last);
+        closeComp();
+        area.remove(s0, p); area.insert(s0, out);
+        if (!stops.some(x => x.n === 0)) stops.push({ n: 0, at: out.length, len: 0 });
+        stops.sort((a, b) => (a.n || 1e9) - (b.n || 1e9));   // $0 — последним
+        const end = area.text.length;
+        snip = stops.map(x => ({ fromEnd: end - s0 - x.at, len: x.len }));
+        nextStop();
+    }
+    function nextStop() {
+        const st = snip[0];
+        snip = snip.slice(1);
+        const a = area.text.length - st.fromEnd;
+        area.select(a, a + st.len);
+    }
+
+    // ── несколько курсоров: Ctrl+D — следующее такое же слово, Alt+клик — ещё курсор. Главный курсор — сам TextEdit ──
+    property var extras: []                   // дополнительные: [{s, e}] (выделение от s до e)
+    property bool multiBusy: false            // правим сами — не сбрасывать курсоры
+    function addNextMatch() {
+        if (selLen === 0) { const w = wordAt(area.cursorPosition); if (w[1] > w[0]) area.select(w[0], w[1]); return; }
+        const w = area.selectedText, t = area.text;
+        let i = t.indexOf(w, area.selectionEnd);
+        if (i < 0) i = t.indexOf(w);
+        const all = extras.concat([{ s: area.selectionStart, e: area.selectionEnd }]);
+        if (i < 0 || all.some(r => r.s === i)) return;
+        multiBusy = true; extras = all; area.select(i, i + w.length); multiBusy = false;
+        Qt.callLater(ensureVisible);
+    }
+    function addCaret(p) {
+        if (p === area.cursorPosition || extras.some(r => r.s === p)) return;
+        multiBusy = true; extras = extras.concat([{ s: area.selectionStart, e: area.selectionEnd }]); area.cursorPosition = p; multiBusy = false;
+    }
+    function multiKey(e) {   // клавиша для всех курсоров сразу; false — не наша, курсоры сбрасываются
+        const k = e.key, ch = e.text, plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier));
+        const L = area.text.length, all = extras.concat([{ s: area.selectionStart, e: area.selectionEnd, main: true }]);
+        if (k === Qt.Key_Escape) { extras = []; return true; }
+        if ((k === Qt.Key_Left || k === Qt.Key_Right) && plain && !(e.modifiers & Qt.ShiftModifier)) {
+            const mv = r => k === Qt.Key_Left ? (r.s < r.e ? r.s : Math.max(0, r.s - 1)) : (r.s < r.e ? r.e : Math.min(L, r.e + 1));
+            multiBusy = true;
+            extras = extras.map(r => ({ s: mv(r), e: mv(r) }));
+            area.cursorPosition = mv(all[all.length - 1]);
+            multiBusy = false; return true;
+        }
+        let op = null;
+        if (k === Qt.Key_Backspace) op = r => r.s < r.e ? [r.s, r.e, ""] : [Math.max(0, r.s - 1), r.s, ""];
+        else if (k === Qt.Key_Delete) op = r => r.s < r.e ? [r.s, r.e, ""] : [r.s, Math.min(L, r.s + 1), ""];
+        else if ((k === Qt.Key_Return || k === Qt.Key_Enter) && plain) op = r => [r.s, r.e, "\n"];
+        else if (ch.length === 1 && plain && ch >= " ") op = r => [r.s, r.e, ch];
+        if (!op) { if (k !== Qt.Key_Shift && k !== Qt.Key_Control && k !== Qt.Key_Alt) extras = []; return false; }
+        const eds = all.map(r => { const o = op(r); return { a: o[0], b: o[1], ins: o[2], main: !!r.main }; }).sort((x, y) => x.a - y.a)
+                       .filter((d, i, arr) => i === 0 || d.a >= arr[i - 1].b);   // курсоры слиплись — правка одна
+        closeComp();
+        multiBusy = true;
+        for (let i = eds.length - 1; i >= 0; i--) { area.remove(eds[i].a, eds[i].b); if (eds[i].ins) area.insert(eds[i].a, eds[i].ins); }
+        let shift = 0, main = -1;
+        const nx = [];
+        for (const d of eds) {
+            const pos = d.a + shift + d.ins.length;
+            shift += d.ins.length - (d.b - d.a);
+            if (d.main) main = pos; else nx.push({ s: pos, e: pos });
+        }
+        if (main < 0) main = nx.pop().s;
+        area.cursorPosition = main; extras = nx;
+        multiBusy = false;
+        return true;
+    }
+
+    // ── подсказка параметров: после «(» и «,» — подпись функции, текущий параметр выделен ──
+    property var sig: null                    // {label, params: [[от, до]…], active}
+    property int sigSeq: 0
+    property int sigLine: -1
+    function requestSig() {
+        if (!path || !app.canComplete(lang)) return;
+        const p = area.cursorPosition, seq = ++sigSeq, lc = lspPos(p);
+        app.lsp("signature", { lang: lang, path: path, text: text, line: lc[0], col: lc[1] }, r => {
+            if (seq !== sigSeq) return;
+            sig = r && r.label ? r : null; sigLine = lineOf(area.cursorPosition);
+        });
+    }
+
+    // ── та же переменная по всему файлу: под мышью, а если мышь не над словом — под курсором (clangd/jedi понимают код,
+    // поэтому однофамильцы из других функций, строк и комментариев не подсвечиваются) ──
+    property var occ: []                      // [[позиция в area, длина]]
+    property int occSeq: 0
+    property int occAt: -1                    // начало слова, для которого уже подсвечено
+    function requestOcc(p) {
+        const w = wordAt(p);
+        if (!path || !app.canComplete(lang) || w[1] <= w[0] || !/[A-Za-z_]/.test(area.text[w[0]])) { occ = []; occAt = -1; return; }
+        if (w[0] === occAt) return;
+        const seq = ++occSeq, lc = lspPos(w[0]);
+        app.lsp("highlight", { lang: lang, path: path, text: text, line: lc[0], col: lc[1] }, r => {
+            if (seq !== occSeq) return;
+            const out = [];
+            for (const h of r.items || []) {   // настоящие строки → видимые; внутри свёрнутого не рисуем
+                const d = dispLine(h[0]);
+                if (realLine(d) === h[0]) out.push([starts[d] + h[1], h[2]]);
+            }
+            occ = out.length > 1 ? out : [];   // одно вхождение подсвечивать незачем
+            occAt = w[0];
+        });
+    }
+    Timer { id: occTimer; property int pos: -1; interval: 120; onTriggered: ed.requestOcc(pos) }
+    function occFrom(p) { occTimer.pos = p; occTimer.restart(); }
+
+    // ── описание под мышью ──
+    property var hover: null                  // {text, x, y, a, b}: что показать и над каким словом
+    property int hoverSeq: 0
+    function requestHover(p, x, y) {
+        const w = wordAt(p);
+        if (!path || !app.canComplete(lang) || w[1] <= w[0] || !/[A-Za-z_]/.test(area.text[w[0]])) { hover = null; return; }
+        if (hover && hover.a === w[0]) return;
+        const seq = ++hoverSeq, lc = lspPos(w[0] + 1 <= w[1] ? w[0] + 1 : w[0]);
+        app.lsp("hover", { lang: lang, path: path, text: text, line: lc[0], col: lc[1] }, r => {
+            if (seq !== hoverSeq || !hov.hovered) return;
+            const t = r && r.text ? r.text.split("\n").slice(0, 16).join("\n") : "";
+            hover = t ? { text: t, x: x, y: y, a: w[0], b: w[1] } : null;
+        });
+    }
+
     // ── поиск ──
     property string query: ""
     property bool matchCase: false
@@ -219,6 +489,10 @@ Item {
         const w = compWord.toLowerCase();
         if (!w) return comps.slice(0, 60);
         const a = [], b = [];
+        // шаблоны — первыми, если слово стоит в начале строки
+        if (/^\s*\w*$/.test(area.text.slice(starts[lineOf(compStart)], area.cursorPosition)))
+            for (const k in snippets) if (k.startsWith(w)) a.push({ label: k, insert: k, kind: 15, detail: "шаблон · Tab", snippet: true,
+                                                                   doc: snippets[k].replace(/\$\{\d+:?([^}]*)\}|\$\d/g, "$1").replace(/\t/g, "  ") });
         for (const c of comps) { const t = c.insert.toLowerCase(); if (t.startsWith(w)) a.push(c); else if (t.indexOf(w) > 0) b.push(c); }
         return a.concat(b).slice(0, 60);
     }
@@ -236,11 +510,12 @@ Item {
     Timer {
         id: compTimer; interval: 70
         onTriggered: {
-            const p = area.cursorPosition, l = ed.lineOf(p), seq = ++ed.compSeq;
+            const p = area.cursorPosition, l = ed.lineOf(p), seq = ++ed.compSeq, lc = ed.lspPos(p);
             const before = area.text.slice(ed.starts[l], p), m = before.match(/[A-Za-z_]\w*$/);
-            ed.app.lspComplete(ed.lang, ed.path, area.text, l, p - ed.starts[l], items => {
+            ed.app.lsp("complete", { lang: ed.lang, path: ed.path, text: ed.text, line: lc[0], col: lc[1] }, r => {
+                const items = r.items || [];
                 if (seq !== ed.compSeq || area.cursorPosition !== p) return;   // пока ждали ответ, курсор ушёл
-                const st = items.length && items[0].start >= 0 ? ed.starts[l] + items[0].start : p - (m ? m[0].length : 0);
+                const st = items.length && items[0].start >= 0 ? p - (lc[1] - items[0].start) : p - (m ? m[0].length : 0);
                 ed.comps = items; ed.compSel = 0; ed.compStart = items.length ? st : -1;
             });
         }
@@ -248,6 +523,7 @@ Item {
     function acceptComp() {
         const c = compShown[compSel];
         if (!c) { closeComp(); return; }
+        if (c.snippet) { area.remove(compStart, area.cursorPosition); area.insert(compStart, c.insert); expandSnippet(c.insert); return; }
         const s0 = compStart, p = area.cursorPosition;
         let ins = c.insert;
         const fn = c.kind === 2 || c.kind === 3 || c.kind === 4;
@@ -257,17 +533,29 @@ Item {
         // у функции с параметрами курсор — внутрь скобок
         area.cursorPosition = s0 + ins.length + (call ? (/\(\s*\)/.test(c.label) ? 2 : 1) : 0);
         closeComp();
+        if (call && !/\(\s*\)/.test(c.label)) Qt.callLater(requestSig);
     }
     function compKind(k) {   // буква и цвет вида варианта
         return ({ 2: ["m", app.pal.light], 3: ["f", app.pal.light], 4: ["c", app.pal.light], 5: ["·", app.pal.text], 6: ["v", app.pal.text],
                   7: ["C", app.pal.acc], 8: ["I", app.pal.acc], 9: ["N", app.pal.dim], 10: ["p", app.pal.text], 13: ["E", app.pal.acc],
                   14: ["k", app.pal.acc], 17: ["i", app.pal.dim], 20: ["e", app.pal.text], 21: ["#", app.pal.light], 22: ["S", app.pal.acc],
-                  25: ["T", app.pal.acc] })[k] || ["·", app.pal.dim];
+                  15: ["s", app.pal.light], 25: ["T", app.pal.acc] })[k] || ["·", app.pal.dim];
     }
 
     // ── набор: отступы, Enter, скобки и кавычки ──
     function key(e) {
         const ctrl = e.modifiers & Qt.ControlModifier, alt = e.modifiers & Qt.AltModifier;
+        hover = null;
+        if (extras.length && multiKey(e)) { e.accepted = true; return; }
+        if (e.key === Qt.Key_Tab && !ctrl && selLen === 0) {   // шаблон: слово + Tab
+            const w = snippetWord();
+            if (w) { expandSnippet(w); e.accepted = true; return; }
+        }
+        if ((e.matches(StandardKey.Copy) || e.matches(StandardKey.Cut)) && area.selectedText.indexOf("\uFDDF") >= 0) {
+            clip.text = expand(area.selectedText); clip.selectAll(); clip.copy();   // в буфер — со свёрнутым внутри
+            if (e.matches(StandardKey.Cut)) area.remove(area.selectionStart, area.selectionEnd);
+            e.accepted = true; return;
+        }
         if (compOpen) {   // открыт список подсказок: стрелки, Enter/Tab — выбрать, Esc — закрыть
             if (e.key === Qt.Key_Down) { compSel = (compSel + 1) % compShown.length; e.accepted = true; return; }
             if (e.key === Qt.Key_Up) { compSel = (compSel - 1 + compShown.length) % compShown.length; e.accepted = true; return; }
@@ -277,9 +565,19 @@ Item {
             if (e.key === Qt.Key_Escape) { closeComp(); e.accepted = true; return; }
             if (e.key === Qt.Key_Left || e.key === Qt.Key_Right || e.key === Qt.Key_Home || e.key === Qt.Key_End) closeComp();
         }
+        if (e.key === Qt.Key_Escape && (sig || snip.length)) { sig = null; snip = []; e.accepted = true; return; }
+        if (e.key === Qt.Key_Tab && !ctrl && snip.length) { nextStop(); e.accepted = true; return; }
         if (e.key === Qt.Key_Backspace && compStart >= 0) Qt.callLater(maybeComplete);
-        if (e.text.length === 1 && !ctrl && !alt) Qt.callLater(() => { if (/[\w.:>]/.test(e.text)) maybeComplete(); else closeComp(); });
+        if (e.key === Qt.Key_Backspace && sig) Qt.callLater(requestSig);
+        if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) sig = null;
+        if (e.text.length === 1 && !ctrl && !alt) Qt.callLater(() => {
+            if (/[\w.:>]/.test(e.text)) maybeComplete(); else closeComp();
+            if (e.text === "(" || e.text === "," || e.text === ")" && sig) requestSig();
+        });
         const t = area.text, p = area.cursorPosition, hasSel = selLen > 0;
+        if (!hasSel && !ctrl && (e.key === Qt.Key_Backspace && t[p - 2] === "\uFDDF" || e.key === Qt.Key_Delete && t[p] === "\uFDDF")) {
+            unfold(e.key === Qt.Key_Backspace ? p - 2 : p); e.accepted = true; return;   // стирать свёрнутое — сначала развернуть
+        }
         const closers = { ")": 1, "]": 1, "}": 1, "\"": 1, "'": 1 }, pairs = { "(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'" };
         if (e.key === Qt.Key_Tab && !ctrl) {
             if (hasSel && area.selectedText.indexOf("\n") >= 0) indent(1);
@@ -348,14 +646,17 @@ Item {
         height: parent.height; clip: true
         Behavior on width { NumberAnimation { duration: app.cfg.anim ? 160 : 0 } }
         readonly property int first: { void (flick.contentY); void (area.contentHeight); return ed.lineOf(area.positionAt(0, flick.contentY - area.y)); }
+        HoverHandler { id: gutterHov }
         Repeater {
             model: Math.ceil(flick.height / Math.max(1, ed.lineH)) + 2
             Item {
                 id: ln
                 required property int index
                 readonly property int line: gutter.first + index
-                readonly property var d: ed.diagAt[line + 1]
-                visible: line < ed.lineCount
+                readonly property int real: { void (ed.lineMap); return ed.realLine(line); }
+                readonly property var d: ed.diagAt[real + 1]
+                readonly property int mark: { void (ed.foldMarks); return visible ? ed.foldMarks.findIndex(m => m >= ed.starts[line] && m <= ed.lineEnd(line)) : -1; }
+                visible: line < ed.starts.length
                 width: gutter.width; height: ed.lineH
                 y: { void (flick.contentY); void (area.contentHeight); void (app.cfg.fontSize); void (area.width);
                      return visible ? area.positionToRectangle(ed.starts[line]).y + area.y - flick.contentY : -100; }
@@ -363,9 +664,17 @@ Item {
                     visible: app.cfg.lineNumbers
                     anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
                     font.family: area.font.family; font.pixelSize: Math.max(9, area.font.pixelSize - 2)
-                    color: ln.line + 1 === ed.curLine ? app.pal.light : ln.d ? (ln.d.sev === "error" ? "#e8607e" : "#e8b85e") : app.pal.faint
-                    font.bold: ln.line + 1 === ed.curLine
-                    text: ln.line + 1
+                    color: ln.real + 1 === ed.curLine ? app.pal.light : ln.d ? (ln.d.sev === "error" ? "#e8607e" : "#e8b85e") : app.pal.faint
+                    font.bold: ln.real + 1 === ed.curLine
+                    text: ln.real + 1
+                }
+                Text {   // свернуть / развернуть блок: стрелка видна, когда мышь над полями (у свёрнутого — всегда)
+                    anchors.right: parent.right; anchors.rightMargin: 1; anchors.verticalCenter: parent.verticalCenter
+                    font.family: app.mono; font.pixelSize: 9; color: ln.mark >= 0 ? app.pal.light : app.pal.dim
+                    visible: { void (area.text); return ln.visible && (ln.mark >= 0 || gutterHov.hovered && ed.foldable(ln.line)); }
+                    text: ln.mark >= 0 ? "▶" : "▼"
+                    MouseArea { anchors.fill: parent; anchors.margins: -4
+                                onClicked: ln.mark >= 0 ? ed.unfold(ed.foldMarks[ln.mark]) : ed.fold(ln.line) }
                 }
                 Rectangle {   // метка ошибки/предупреждения; наведение — текст сообщения
                     visible: !!ln.d
@@ -446,6 +755,36 @@ Item {
     }
 
     ToolTipBox { app: ed.app; show: !!ed.tip; msg: ed.tip ? ed.tip.msg : ""; x: gutter.width + 6; y: ed.tip ? ed.tip.y - 4 : 0 }
+    ToolTipBox {   // описание под мышью
+        app: ed.app; show: !!ed.hover && !ed.compOpen; msg: ed.hover ? ed.hover.text : ""
+        x: ed.hover ? Math.max(4, Math.min(ed.width - width - 8, ed.hover.x - 20)) : 0
+        y: ed.hover ? (ed.hover.y + ed.lineH + height + 6 < ed.height ? ed.hover.y + ed.lineH + 4 : Math.max(4, ed.hover.y - height - 4)) : 0
+    }
+    Rectangle {   // подсказка параметров над курсором
+        id: sigBox
+        readonly property rect r: { void (flick.contentY); void (flick.contentX); return area.cursorRectangle; }
+        readonly property real cy: r.y + area.y - flick.contentY
+        visible: !!ed.sig && area.activeFocus
+        z: 95
+        x: Math.max(4, Math.min(ed.width - width - 8, gutter.width + r.x + area.x - flick.contentX - 20))
+        y: cy - height - 4 >= 0 ? cy - height - 4 : cy + ed.lineH + 4
+        width: Math.min(ed.width - 20, sigText.implicitWidth + 20); height: sigText.implicitHeight + 10; radius: 6
+        color: Qt.alpha(ed.app.pal.head, 0.97); border.width: 1; border.color: Qt.alpha(ed.app.pal.acc, 0.5)
+        Text {
+            id: sigText
+            x: 10; y: 5; width: Math.min(implicitWidth, ed.width - 40); elide: Text.ElideRight
+            font.family: ed.app.cfg.font; font.pixelSize: Math.max(11, ed.app.cfg.fontSize - 2); textFormat: Text.StyledText; color: ed.app.pal.dim
+            function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+            text: {
+                const s = ed.sig;
+                if (!s) return "";
+                const p = s.params[s.active];
+                if (!p || p[1] <= p[0]) return esc(s.label);
+                return esc(s.label.slice(0, p[0])) + "<b><font color='" + ed.app.pal.light + "'>" + esc(s.label.slice(p[0], p[1])) + "</font></b>" + esc(s.label.slice(p[1]));
+            }
+        }
+    }
+    TextEdit { id: clip; visible: false }
 
     Flickable {
         id: flick
@@ -479,7 +818,7 @@ Item {
             model: ed.diags
             Rectangle {
                 required property var modelData
-                readonly property int l: Math.min(ed.lineCount - 1, modelData.line - 1)
+                readonly property int l: { void (ed.lineMap); return ed.dispLine(modelData.line - 1); }
                 x: 0; width: flick.contentWidth; height: ed.lineH
                 y: { void (area.contentHeight); void (app.cfg.fontSize); return area.positionToRectangle(ed.starts[l] || 0).y + area.y; }
                 color: Qt.alpha(modelData.sev === "error" ? "#e8607e" : "#e8b85e", 0.09)
@@ -498,6 +837,18 @@ Item {
                 border.width: 1; border.color: Qt.alpha(app.pal.acc, 0.5)
             }
         }
+        // та же переменная в других местах файла
+        Repeater {
+            model: ed.occ
+            Rectangle {
+                required property var modelData
+                readonly property rect r: { void (area.contentHeight); void (app.cfg.fontSize); return area.positionToRectangle(modelData[0]); }
+                x: r.x + area.x - 1; y: r.y + area.y; height: r.height; radius: 3
+                width: { void (area.contentHeight); return area.positionToRectangle(modelData[0] + modelData[1]).x - r.x + 2; }
+                color: Qt.alpha(app.pal.light, 0.13)
+                border.width: 1; border.color: Qt.alpha(app.pal.light, 0.4)
+            }
+        }
         // парные скобки
         Repeater {
             model: ed.brackets
@@ -507,6 +858,35 @@ Item {
                 x: r.x + area.x; y: r.y + area.y; width: ed.charW; height: r.height; radius: 2
                 color: ed.brackets.length === 1 ? Qt.alpha("#e8607e", 0.35) : Qt.alpha(app.pal.sel, 0.55)
                 border.width: 1; border.color: ed.brackets.length === 1 ? "#e8607e" : Qt.alpha(app.pal.light, 0.6)
+            }
+        }
+
+        // свёрнутые блоки: плашка «⋯» поверх метки, клик — развернуть
+        Repeater {
+            model: ed.foldMarks
+            Rectangle {
+                required property int modelData
+                readonly property rect r: { void (area.contentHeight); void (app.cfg.fontSize); return area.positionToRectangle(modelData); }
+                x: r.x + area.x; y: r.y + area.y + 2; height: r.height - 4; radius: 4; z: 2
+                width: { void (area.contentHeight); return Math.max(ed.charW * 2, area.positionToRectangle(modelData + 2).x - r.x); }
+                color: fpm.containsMouse ? app.pal.sel : app.pal.head; border.width: 1; border.color: Qt.alpha(app.pal.acc, 0.6)
+                Text { anchors.centerIn: parent; font.family: app.mono; font.pixelSize: Math.max(9, app.cfg.fontSize - 3); color: app.pal.light; text: "⋯" }
+                MouseArea { id: fpm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: ed.unfold(parent.modelData) }
+            }
+        }
+        // дополнительные курсоры
+        Repeater {
+            model: ed.extras
+            Item {
+                required property var modelData
+                readonly property rect rs: { void (area.contentHeight); void (app.cfg.fontSize); return area.positionToRectangle(modelData.s); }
+                readonly property rect re: { void (area.contentHeight); void (app.cfg.fontSize); return area.positionToRectangle(modelData.e); }
+                z: 2
+                Rectangle { visible: parent.modelData.e > parent.modelData.s && parent.re.y === parent.rs.y
+                            x: parent.rs.x + area.x; y: parent.rs.y + area.y; width: parent.re.x - parent.rs.x; height: parent.rs.height
+                            color: Qt.alpha(app.pal.sel, 0.75) }
+                Rectangle { x: parent.re.x + area.x; y: parent.re.y + area.y; width: 2; height: parent.re.height; color: app.pal.light
+                            opacity: caretBlink.on ? 1 : 0.35 }
             }
         }
 
@@ -524,11 +904,40 @@ Item {
             tabStopDistance: ed.charW * app.cfg.tabWidth
             focus: true
             Keys.onPressed: e => ed.key(e)
-            onTextChanged: { ed.recount(); ed.findAll(); ed.edited(); }
+            onTextChanged: { ed.recount(); ed.findAll(); ed.edited(); if (!ed.multiBusy && ed.extras.length) ed.extras = [];
+                             ed.occ = []; ed.occAt = -1; ed.occFrom(cursorPosition); }
             onCursorPositionChanged: { if (ed.compStart >= 0 && (cursorPosition < ed.compStart || /\W/.test(text.slice(ed.compStart, cursorPosition)))) ed.closeComp();
+                                       if (!ed.multiBusy && ed.extras.length) ed.extras = [];
+                                       if (!hov.hovered || !hov.onWord) ed.occFrom(cursorPosition);
+                                       if (ed.sig && ed.lineOf(cursorPosition) !== ed.sigLine) ed.sig = null;
+                                       if (text[cursorPosition - 1] === "\uFDDF" && ed.selLen === 0) cursorPosition++;   // не внутри метки свёрнутого
                                        ed.updCursor(); Qt.callLater(ed.ensureVisible); Qt.callLater(ed.matchBracket); blink.restart(); caretBlink.on = true; }
             cursorDelegate: Item {}   // свой курсор ниже: мигает таймером, а не анимацией каждый кадр
             Timer { id: blink; interval: 530; repeat: true; running: area.activeFocus; onTriggered: caretBlink.on = !caretBlink.on }
+            HoverHandler {   // описание под мышью: задержались на слове — спросить clangd/jedi
+                id: hov
+                property bool onWord: false
+                onPointChanged: {
+                    const p = point.position, pos = area.positionAt(p.x, p.y), w = ed.wordAt(pos);
+                    onWord = w[1] > w[0];
+                    ed.occFrom(onWord ? pos : area.cursorPosition);
+                    if (ed.hover && (pos < ed.hover.a || pos > ed.hover.b)) ed.hover = null;
+                    hoverTimer.pos = pos; hoverTimer.at = area.mapToItem(ed, p.x, area.positionToRectangle(pos).y); hoverTimer.restart();
+                }
+                onHoveredChanged: if (!hovered) { ed.hover = null; hoverTimer.stop(); onWord = false; ed.occFrom(area.cursorPosition); }
+            }
+            Timer { id: hoverTimer; property int pos; property point at; interval: 550; onTriggered: ed.requestHover(pos, at.x, at.y) }
+        }
+        MouseArea {   // Ctrl+клик — к определению, Alt+клик — ещё курсор; обычные клики проходят к тексту
+            anchors.fill: area; z: 3
+            cursorShape: Qt.IBeamCursor
+            onPressed: m => {
+                const pos = area.positionAt(m.x, m.y);
+                if (m.modifiers & Qt.ControlModifier) ed.app.gotoDef(ed, pos);
+                else if (m.modifiers & Qt.AltModifier) ed.addCaret(pos);
+                else { m.accepted = false; return; }
+                area.forceActiveFocus();
+            }
         }
         Rectangle {
             id: caretBlink

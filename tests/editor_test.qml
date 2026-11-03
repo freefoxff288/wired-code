@@ -13,7 +13,7 @@ Item {
 
     property int fails: 0
     function eq(name, got, want) { if (got !== want) { fails++; console.log("FAIL", name, JSON.stringify(got), "!=", JSON.stringify(want)); } }
-    function press(key, text, mods) { const e = { key: key, text: text || "", modifiers: mods || 0, accepted: false }; ed.key(e); if (!e.accepted && text) ed.area.insert(ed.area.cursorPosition, text); }
+    function press(key, text, mods) { const e = { key: key, text: text || "", modifiers: mods || 0, accepted: false, matches: () => false }; ed.key(e); if (!e.accepted && text) ed.area.insert(ed.area.cursorPosition, text); }
     function set(t, pos) { ed.area.text = t; ed.area.cursorPosition = pos === undefined ? t.length : pos; }
 
     Component.onCompleted: Qt.callLater(run)   // после того как редактор сам закончит создаваться
@@ -55,6 +55,30 @@ Item {
         set("x.pu", 4); ed.comps = [{ label: "pub", insert: "pub", kind: 5 }, { label: "push", insert: "push", kind: 6 }, { label: "apush", insert: "apush", kind: 6 }];
         ed.compStart = 2; eq("comp-filter", ed.compShown.map(c => c.insert).join(","), "pub,push,apush");
         ed.area.insert(4, "s"); eq("comp-narrow", ed.compShown.map(c => c.insert).join(","), "push,apush");
+        // шаблон: for + Tab, поле n выделено, Tab — к телу цикла
+        ed.title = "t.cpp"; set("    for", 7); press(Qt.Key_Tab);
+        eq("snip", ed.area.text, "    for (int i = 0; i < n; i++) {\n        \n    }"); eq("snip-sel", ed.area.selectedText, "n");
+        ed.area.remove(ed.area.selectionStart, ed.area.selectionEnd); ed.area.insert(ed.area.cursorPosition, "10"); press(Qt.Key_Tab);
+        eq("snip-next", ed.area.cursorPosition, ed.area.text.indexOf("\n        \n") + 9); eq("snip-done", ed.snip.length, 0);
+        set("int x = ma", 10); press(Qt.Key_Tab); eq("snip-not-midline", ed.area.text.indexOf("return 0"), -1);
+        // сворачивание: в area — метка, а ed.text (сохранение, clangd) — весь файл; номера строк настоящие
+        const src = "int main() {\n    int a = 1;\n    return a;\n}\nint z;\n";
+        set(src, 0); eq("fold", ed.fold(0), true); eq("fold-lines", ed.area.text.split("\n").length, 3);
+        eq("fold-text", ed.text, src); eq("fold-count", ed.lineCount, 6); eq("fold-real", ed.realLine(1), 4);
+        eq("fold-disp", ed.dispLine(2), 0); eq("fold-lsp", JSON.stringify(ed.lspPos(ed.area.text.indexOf("int z") + 4)), "[4,4]");
+        eq("fold-dirty-src", ed.text === src, true);
+        ed.unfoldAll(); eq("unfold", ed.area.text, src);
+        ed.title = "t.py"; const py = "def f():\n    x = 1\n    return x\n\nprint(f())\n";
+        set(py, 0); ed.fold(0); eq("py-fold", ed.area.text.split("\n").length, 4); eq("py-text", ed.text, py);
+        ed.area.cursorPosition = ed.area.text.indexOf("\n"); press(Qt.Key_Backspace); eq("bs-unfolds", ed.area.text, py);
+        // несколько курсоров: Ctrl+D по слову, набор во всех местах
+        ed.title = "t.cpp"; set("a b a c a", 0); ed.addNextMatch(); eq("cd-word", ed.area.selectedText, "a");
+        ed.addNextMatch(); ed.addNextMatch(); eq("cd-n", ed.extras.length, 2);
+        press(0, "x"); eq("multi-type", ed.area.text, "x b x c x"); press(Qt.Key_Backspace); eq("multi-bs", ed.area.text, " b  c ");
+        press(Qt.Key_Escape); eq("multi-esc", ed.extras.length, 0);
+        set("ab\ncd", 0); ed.addCaret(3); press(0, "-"); eq("alt-click", ed.area.text, "-ab\n-cd");
+        // замена всего текста (формат): меняется только середина, курсор остаётся у того же кода
+        set("int  a;\nint b;", 12); ed.setText("int a;\nint b;"); eq("settext", ed.area.text, "int a;\nint b;"); eq("settext-cur", ed.area.cursorPosition, 11);
         // сохранение: запись + сверка чтением (раньше чтение обгоняло запись и сообщало ложную ошибку)
         ed.path = "/tmp/wired-code-save-test.py"; ed.loaded = true; set("print('какащке')\n".repeat(5000));
         ed.save(ok => {

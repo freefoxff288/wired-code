@@ -13,10 +13,12 @@ need python3 python; need g++ gcc
 if ((${#miss[@]})); then echo "Не хватает пакетов: ${miss[*]}"; echo "  Arch/CachyOS: sudo pacman -S ${miss[*]}"; exit 1; fi
 command -v clangd >/dev/null || echo "clangd не найден — автодополнения C++ не будет (sudo pacman -S clang)"
 python3 -c "import jedi" 2>/dev/null || echo "jedi не найден — автодополнения Python не будет (sudo pacman -S python-jedi)"
+command -v clang-format >/dev/null || echo "clang-format не найден — форматирования C++ не будет (sudo pacman -S clang)"
+python3 -c "import black" 2>/dev/null || command -v black >/dev/null || echo "black не найден — форматирования Python не будет (sudo pacman -S python-black)"
 command -v cmake >/dev/null || echo "cmake не найден — проекты C++ с CMakeLists.txt не соберутся (sudo pacman -S cmake)"
 
 mkdir -p "$D/tests" "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/org.kde.syntax-highlighting/themes"
-cp Code.qml Editor.qml TreeNode.qml ToolTipBox.qml lsp.py icon.svg "$D/"
+cp Code.qml Editor.qml TreeNode.qml ToolTipBox.qml lsp.py runner.py icon.svg "$D/"
 cp tests/editor_test.qml "$D/tests/"
 # темы: если стоит рабочий стол Wired (wired-themes) — ссылка на общий файл, иначе своя копия
 if [ -f "$HOME/.local/share/wired-themes/themes.js" ]; then ln -sfn ../wired-themes/themes.js "$D/themes.js"; else cp themes.js "$D/"; fi

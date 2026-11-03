@@ -2,8 +2,10 @@
 // Клавиши (полный список — F1):
 //   Ctrl+N/O/S/Shift+S/W — новый, открыть, сохранить, сохранить как, закрыть · Ctrl+Shift+O — папка · Ctrl+Shift+N — проект
 //   Ctrl+Tab, Alt+1..9 — вкладки · Ctrl+P — быстрый переход к файлу · Ctrl+G — к строке · Ctrl+F/H — поиск/замена
-//   Ctrl+/ — комментарий · Ctrl+D — дублировать · Ctrl+Shift+K — удалить строку · Alt+↑/↓ — двигать строки
-//   F5 — запустить · Ctrl+Shift+B — собрать · Shift+F5 — стоп · Ctrl+J — терминал · Ctrl+B — проект · F8 — следующая ошибка
+//   Ctrl+/ — комментарий · Ctrl+Shift+D — дублировать · Ctrl+Shift+K — удалить строку · Alt+↑/↓ — двигать строки
+//   Ctrl+D / Alt+клик — ещё курсор · F9 — свернуть блок · F12 / Ctrl+клик — к определению · F2 — переименовать
+//   Shift+Alt+F — форматировать · Ctrl+Shift+F — поиск по проекту · Ctrl+Shift+E — структура файла · слово+Tab — шаблон
+//   F5 — запустить · Ctrl+Shift+R — ввод и аргументы · Ctrl+Shift+B — собрать · Shift+F5 — стоп · Ctrl+J — терминал · F8 — ошибка
 import QtQuick
 import QtQuick.Window
 import QtQuick.Dialogs
@@ -57,6 +59,9 @@ Window {
         property string session: "[]"
         property int sessionCur: 0
         property string expanded: "{}"
+        property bool autoSave: true
+        property string sideTab: "files"      // files | outline
+        property string runIO: "{}"           // ввод и аргументы запуска: {программа: {input, args, on}}
     }
     readonly property alias cfg: settingsObj
 
@@ -114,11 +119,11 @@ Window {
     readonly property var curEd: cur >= 0 && cur < docs.count ? editors.itemAt(cur) : null
     readonly property string curPath: curEd ? curEd.path : ""
     property int untitled: 0
-    function openFile(p, line) {
-        for (let i = 0; i < docs.count; i++) if (docs.get(i).path === p) { cur = i; if (line) Qt.callLater(() => curEd.gotoLine(line)); focusEd(); return; }
+    function openFile(p, line, col) {
+        for (let i = 0; i < docs.count; i++) if (docs.get(i).path === p) { cur = i; if (line) Qt.callLater(() => curEd.gotoLine(line, col)); focusEd(); return; }
         docs.append({ path: p, title: baseName(p) });
         cur = docs.count - 1;
-        if (line) Qt.callLater(() => curEd.gotoLine(line));
+        if (line) Qt.callLater(() => curEd.gotoLine(line, col));
         saveSession(); focusEd();
         Qt.callLater(() => check(curEd));
     }
@@ -164,7 +169,8 @@ Window {
         const l = []; for (let i = 0; i < docs.count; i++) if (docs.get(i).path) l.push(docs.get(i).path);
         cfg.session = JSON.stringify(l); cfg.sessionCur = Math.max(0, cur);
     }
-    onCurChanged: { if (cfg.anim) switchFx.restart(); saveSession(); Qt.callLater(focusEd); }
+    onCurChanged: { if (cfg.anim) switchFx.restart(); saveSession(); Qt.callLater(focusEd); if (cfg.autoSave) saveAll(); outlineTimer.restart(); }
+    onActiveChanged: if (!active && cfg.autoSave) saveAll()   // автосохранение: ушли в другое окно
     function focusEd() { if (curEd) curEd.area.forceActiveFocus(); }
     function zoom(d) { cfg.fontSize = d === 0 ? 15 : Math.max(9, Math.min(32, cfg.fontSize + d)); }
 
@@ -247,30 +253,45 @@ Window {
 
     // ══════ запуск и сборка во встроенном терминале ══════
     property string pending: ""             // команда ждёт, пока шелл в терминале загрузится
+    property string runRoot: ""             // откуда запускали: от неё считаются пути в ошибках терминала
+    readonly property string appDir: decodeURIComponent(Qt.resolvedUrl(".").toString().replace("file://", "")).replace(/\/$/, "")
+    function runKey(e) { return e && e.lang === "cpp" && cmakeExe && cfg.project && e.path.startsWith(cfg.project + "/") ? cfg.project : e ? e.path : ""; }
+    function ioFor(k) { try { return JSON.parse(cfg.runIO)[k] || { input: "", args: "", on: true }; } catch (x) { return { input: "", args: "", on: true }; } }
+    function setIO(k, v) { let m = {}; try { m = JSON.parse(cfg.runIO); } catch (x) {} m[k] = v; cfg.runIO = JSON.stringify(m); }
     function run(buildOnly) {
         const e = curEd;
         if (!e) return;
         if (!e.path) { toast("сначала сохрани файл (Ctrl+S)", "warn"); return; }
         saveAll(() => {
             const root = cfg.project && e.path.startsWith(cfg.project + "/") ? cfg.project : dirOf(e.path);
+            const io = ioFor(runKey(e)), stats = runDir + "/stats", inFile = runDir + "/stdin-" + Qt.md5(runKey(e)).slice(0, 8);
+            const useIn = !buildOnly && io.on && io.input !== "";
+            // сама программа — через runner.py: он замеряет время и память
+            const prog = p => "python3 " + quote(appDir + "/runner.py") + " " + quote(stats) + " " + p + (io.args ? " " + io.args : "") + (useIn ? " < " + quote(inFile) : "");
             let cmd = "", what = e.name;
             if (e.lang === "cpp" && cmakeExe && root === cfg.project) {
                 what = cmakeExe + " (cmake)";
                 cmd = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > /dev/null && cmake --build build -j" +
-                      (buildOnly ? "" : " && ./build/" + cmakeExe);
+                      (buildOnly ? "" : " && " + prog("./build/" + cmakeExe));
             } else if (e.lang === "cpp") {
                 if (/\.(h|hh|hpp|hxx)$/i.test(e.name)) { toast("это заголовок — запусти файл с main()", "warn"); return; }
                 const out = "build/" + stem(e.path), rel = e.path.slice(root.length + 1);
-                cmd = "mkdir -p build && g++ -std=" + cfg.std + " -Wall -Wextra -g " + quote(rel) + " -o " + quote(out) + (buildOnly ? "" : " && ./" + quote(out));
+                cmd = "mkdir -p build && g++ -std=" + cfg.std + " -Wall -Wextra -g " + quote(rel) + " -o " + quote(out) + (buildOnly ? "" : " && " + prog("./" + quote(out)));
             } else if (e.lang === "python") {
                 if (buildOnly) { check(e); toast("python не собирается — проверка синтаксиса запущена", "info"); return; }
-                cmd = "python3 " + quote(e.path.slice(root.length + 1));
-            } else if (/\.sh$/.test(e.name)) cmd = "bash " + quote(e.path);
+                cmd = prog("python3 " + quote(e.path.slice(root.length + 1)));
+            } else if (/\.sh$/.test(e.name)) cmd = prog("bash " + quote(e.path));
             else { toast("не знаю, как запустить " + e.name, "warn"); return; }
-            const head = "printf '\\033[2m── wired // " + (buildOnly ? "build" : "run") + " " + what.replace(/'/g, "") + " ──\\033[0m\\n'";
-            const tail = "s=$?; printf '\\n\\033[2m── exit %s ──\\033[0m\\n' $s";
-            termRun("clear; cd " + quote(root) + " && " + head + "; (" + cmd + "); " + tail);
-            runFx.restart();
+            const head = "printf '\\033[2m── wired // " + (buildOnly ? "build" : "run") + " " + what.replace(/'/g, "") + (useIn ? " · ввод из сохранённого" : "") + " ──\\033[0m\\n'";
+            const tail = "s=$?; printf '\\n\\033[2m── exit %s%s ──\\033[0m\\n' $s \"$(cat " + quote(stats) + " 2>/dev/null)\"";
+            const go = () => { termRun("clear; rm -f " + quote(stats) + "; cd " + quote(root) + " && " + head + "; (" + cmd + "); " + tail); runFx.restart(); };
+            runRoot = root;
+            if (!useIn) { go(); return; }
+            exec("mkdir -p " + quote(runDir), () => {   // ввод — в файл, и только потом команда
+                const w = new XMLHttpRequest();
+                w.onreadystatechange = () => { if (w.readyState === XMLHttpRequest.DONE) go(); };
+                w.open("PUT", "file://" + inFile); w.send(io.input.endsWith("\n") ? io.input : io.input + "\n");
+            });
         });
     }
     function termRun(cmd) {
@@ -372,17 +393,97 @@ Window {
             x.open("GET", "file://" + win.lspFile); x.send();
         }
     }
-    function lspComplete(lang, path, text, line, col, cb) {
-        if (!lspPort) return;
+    function lsp(op, body, cb) {   // op: complete, signature, hover, definition, rename, symbols, format (см. lsp.py)
+        if (!lspPort) return false;
         const x = new XMLHttpRequest();
         x.onreadystatechange = () => {
             if (x.readyState !== XMLHttpRequest.DONE) return;
-            if (x.status === 200) { try { cb(JSON.parse(x.responseText).items || []); } catch (e) {} }
+            if (x.status === 200) { let r = null; try { r = JSON.parse(x.responseText); } catch (e) {} if (r) cb(r); }
             else if (x.status === 0) lspPort = 0;   // мост упал — перечитаем порт (если он ещё жив)
         };
-        x.open("POST", "http://127.0.0.1:" + lspPort + "/complete");
+        x.open("POST", "http://127.0.0.1:" + lspPort + "/" + op);
         x.setRequestHeader("X-Token", lspToken); x.setRequestHeader("Content-Type", "application/json");
-        x.send(JSON.stringify({ lang: lang, path: path, text: text, line: line, col: col }));
+        x.send(JSON.stringify(body));
+        return true;
+    }
+    function edBody(e, pos) { const lc = e.lspPos(pos); return { lang: e.lang, path: e.path, text: e.text, line: lc[0], col: lc[1] }; }
+    function gotoDef(e, pos) {   // F12 / Ctrl+клик
+        if (!e || !canComplete(e.lang)) { toast("переход к определению — для C++ и Python", "warn"); return; }
+        lsp("definition", edBody(e, pos), r => {
+            if (r.path) openFile(r.path, r.line, r.col);
+            else toast(r.error ? r.error : "определение не найдено", "warn");
+        });
+    }
+    function renameSymbol() {   // F2: имя меняется во всех файлах, где оно встречается
+        const e = curEd;
+        if (!e || !canComplete(e.lang)) { toast("переименование — для C++ и Python", "warn"); return; }
+        const w = e.wordAt(e.area.cursorPosition), old = e.area.text.slice(w[0], w[1]);
+        if (!old) { toast("поставь курсор на имя", "warn"); return; }
+        prompt("Переименовать «" + old + "» в", old, n => {
+            if (n === old) return;
+            if (!/^[A-Za-z_]\w*$/.test(n)) { toast("так назвать нельзя: " + n, "warn"); return; }
+            saveAll(() => lsp("rename", Object.assign(edBody(e, w[0]), { name: n }), r => {
+                const files = r.files || {}, paths = Object.keys(files);
+                if (!paths.length) { toast(r.error || "здесь нечего переименовать", "warn"); return; }
+                for (const p of paths) {
+                    let open = false;
+                    for (let i = 0; i < docs.count; i++) if (docs.get(i).path === p) { editors.itemAt(i).setText(files[p]); open = true; }
+                    if (!open) { const x = new XMLHttpRequest(); x.open("PUT", "file://" + p); x.send(files[p]); }
+                }
+                toast("«" + old + "» → «" + n + "» · файлов: " + paths.length, "info");
+            }));
+        });
+    }
+    function formatDoc() {   // Shift+Alt+F: clang-format для C++, black/ruff/autopep8 для Python
+        const e = curEd;
+        if (!e || (e.lang !== "cpp" && e.lang !== "python")) { toast("форматирование — для C++ и Python", "warn"); return; }
+        if (!lsp("format", { lang: e.lang, path: e.path, text: e.text, tab: cfg.tabWidth }, r => {
+            if (r.error) { toast(r.error, "error"); return; }
+            if (r.text === e.text) { toast("уже аккуратно", "info"); return; }
+            e.setText(r.text); toast("отформатировано", "info");
+        })) toast("мост ещё не запустился", "warn");
+    }
+
+    // ── структура файла (боковая панель): функции и классы от clangd/jedi ──
+    property var outline: []
+    property string outlineFor: ""
+    Timer { id: outlineTimer; interval: 500; onTriggered: win.refreshOutline() }
+    function refreshOutline() {
+        const e = curEd;
+        if (cfg.sideTab !== "outline" || !cfg.sideOpen || !e || !canComplete(e.lang)) { outline = []; outlineFor = e ? e.path : ""; return; }
+        const p = e.path;
+        lsp("symbols", { lang: e.lang, path: p, text: e.text }, r => { if (win.curEd === e) { win.outline = r.items || []; win.outlineFor = p; } });
+    }
+
+    // ── поиск по проекту (Ctrl+Shift+F) ──
+    property var hits: []                   // [{file, line, text}]
+    property string hitsFor: ""
+    readonly property string searchRoot: cfg.project || (curEd && curEd.path ? dirOf(curEd.path) : home)
+    Timer { id: searchTimer; interval: 250; onTriggered: win.searchProject(searchField.input.text) }
+    function searchProject(q) {
+        if (!q) { hits = []; hitsFor = ""; return; }
+        execOut("cd " + quote(searchRoot) + " && grep -rnIi -F --exclude-dir=.git --exclude-dir=build --exclude-dir='cmake-build-*' --exclude-dir=__pycache__" +
+                " --exclude-dir=.venv --exclude-dir=venv --exclude-dir=.cache --exclude-dir=node_modules -m 50 -- " + quote(q) + " . | head -400", out => {
+            if (searchField.input.text !== q) return;
+            hits = out.split("\n").map(l => l.match(/^\.\/(.+?):(\d+):(.*)$/)).filter(m => m).map(m => ({ file: m[1], line: +m[2], text: m[3].trim().slice(0, 200) }));
+            hitsFor = q;
+        });
+    }
+    function openHit(h) {
+        searchBox.open = false;
+        openFile(searchRoot + "/" + h.file, h.line);
+        Qt.callLater(() => { const e = win.curEd; if (!e) return; const ls = e.starts[e.lineOf(e.area.cursorPosition)], i = e.area.text.slice(ls, e.lineEnd(e.lineOf(ls))).toLowerCase().indexOf(win.hitsFor.toLowerCase());
+                             if (i >= 0) e.area.select(ls + i, ls + i + win.hitsFor.length); });
+    }
+
+    // ── ошибки в терминале: Ctrl+клик по «main.cpp:12:5» или «File "x.py", line 3» ──
+    function openFromTerm(line) {
+        const m = line.match(/([\w.\/~+-]*[\w+-]\.(?:cpp|cc|cxx|c\+\+|c|hpp|hh|hxx|h|py|pyw|txt|cmake)):(\d+)(?::(\d+))?/) ||
+                  line.match(/File "([^"]+)", line (\d+)()/);
+        if (!m) { toast("в этой строке нет ссылки на файл", "warn"); return; }
+        let f = m[1].replace(/^~/, home);
+        if (!f.startsWith("/")) f = (runRoot || cfg.project || home) + "/" + f;
+        openFile(f, +m[2], +(m[3] || 1));
     }
 
     // ══════ быстрый переход к файлу (Ctrl+P) ══════
@@ -436,7 +537,14 @@ Window {
         id: shot; property string file; property var acts: []; interval: 2500
         readonly property var actions: ({ settings: () => setMenu.open = true, theme: () => themeMenu.open = true, help: () => help.open = true,
             find: () => { findBar.show(true); findField.input.text = "sum"; }, run: () => win.run(false), term: () => termPanel.open = true,
-            newproj: () => newProj.show("cpp"), complete: () => { win.curEd.gotoLine(4, 999); win.curEd.maybeComplete(true); }, quick: () => win.quickOpen(), menu: () => win.treeMenu(cfg.project, true, Qt.point(80, 120)) })
+            newproj: () => newProj.show("cpp"), complete: () => { win.curEd.gotoLine(4, 999); win.curEd.maybeComplete(true); }, quick: () => win.quickOpen(), menu: () => win.treeMenu(cfg.project, true, Qt.point(80, 120)),
+            sig: () => { win.curEd.gotoLine(10, 22); win.curEd.requestSig(); },
+            runio: () => { win.setIO(win.runKey(win.curEd), { input: "21\n", args: "", on: true }); win.run(false); },
+            fold: () => { win.curEd.foldAll(); }, outline: () => { cfg.sideTab = "outline"; win.refreshOutline(); },
+            search: () => { searchBox.show(); searchField.input.text = "int"; }, io: () => ioBox.show(),
+            multi: () => { win.curEd.gotoLine(2, 5); win.curEd.addNextMatch(); win.curEd.addNextMatch(); win.curEd.addNextMatch(); },
+            occ: () => { win.curEd.gotoLine(6, 10); },
+            hover: () => { win.curEd.requestHover(win.curEd.starts[3] + 6, 200, 120); } })
         onTriggered: {
             if (acts.length) { for (const a of acts) actions[a](); acts = []; interval = 3500; start(); return; }
             body.grabToImage(r => { r.saveToFile(file); Qt.quit(); });
@@ -466,6 +574,9 @@ Window {
     Shortcut { sequence: "Shift+F3"; onActivated: if (win.curEd) win.curEd.findNext(true) }
     Shortcut { sequence: "Ctrl+G"; onActivated: if (win.curEd) { gotoBox.open = true; gotoField.input.text = ""; gotoField.input.forceActiveFocus(); } }
     Shortcut { sequence: "Ctrl+P"; onActivated: win.quickOpen() }
+    Shortcut { sequence: "Ctrl+Shift+F"; onActivated: searchBox.show() }
+    Shortcut { sequence: "Ctrl+Shift+R"; onActivated: ioBox.show() }
+    Shortcut { sequence: "Ctrl+Shift+E"; onActivated: { cfg.sideOpen = true; cfg.sideTab = cfg.sideTab === "outline" ? "files" : "outline"; win.refreshOutline(); } }
     Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; onActivated: win.zoom(1) }
     Shortcut { sequence: "Ctrl+-"; onActivated: win.zoom(-1) }
     Shortcut { sequence: "Ctrl+0"; onActivated: win.zoom(0) }
@@ -476,7 +587,15 @@ Window {
     Shortcut { sequence: "Escape"; enabled: win.anyPopup; onActivated: win.closePopups() }
     // правка кода — только когда фокус в редакторе (иначе Ctrl+D в поле поиска испортил бы файл)
     Shortcut { sequence: "Ctrl+/"; enabled: win.edFocus; onActivated: win.curEd.toggleComment() }
-    Shortcut { sequence: "Ctrl+D"; enabled: win.edFocus; onActivated: win.curEd.duplicate() }
+    Shortcut { sequence: "Ctrl+Shift+D"; enabled: win.edFocus; onActivated: win.curEd.duplicate() }
+    Shortcut { sequence: "Ctrl+D"; enabled: win.edFocus; onActivated: win.curEd.addNextMatch() }
+    Shortcut { sequence: "F9"; enabled: win.edFocus; onActivated: win.curEd.toggleFold() }
+    Shortcut { sequence: "Ctrl+F9"; enabled: win.edFocus; onActivated: win.curEd.foldAll() }
+    Shortcut { sequence: "Shift+F9"; enabled: win.edFocus; onActivated: win.curEd.unfoldAll() }
+    Shortcut { sequence: "F12"; enabled: win.edFocus; onActivated: win.gotoDef(win.curEd, win.curEd.area.cursorPosition) }
+    Shortcut { sequence: "F2"; enabled: win.edFocus; onActivated: win.renameSymbol() }
+    Shortcut { sequence: "Shift+Alt+F"; enabled: !!win.curEd; onActivated: win.formatDoc() }
+    Shortcut { sequence: "Ctrl+Shift+Space"; enabled: win.edFocus; onActivated: win.curEd.requestSig() }
     Shortcut { sequence: "Ctrl+Shift+K"; enabled: win.edFocus; onActivated: win.curEd.deleteLine() }
     Shortcut { sequence: "Alt+Up"; enabled: win.edFocus; onActivated: win.curEd.moveLines(-1) }
     Shortcut { sequence: "Alt+Down"; enabled: win.edFocus; onActivated: win.curEd.moveLines(1) }
@@ -488,12 +607,12 @@ Window {
     Shortcut { sequence: "Ctrl+Y"; enabled: win.edFocus; onActivated: win.curEd.area.redo() }
     Shortcut { sequences: ["Ctrl+Space", "Ctrl+I"]; enabled: win.edFocus; onActivated: win.curEd.maybeComplete(true) }
 
-    readonly property bool anyPopup: setMenu.open || themeMenu.open || quick.open || gotoBox.open || help.open || newProj.open || menu.open || !!askData || !!promptData || findBar.open
+    readonly property bool anyPopup: setMenu.open || themeMenu.open || quick.open || gotoBox.open || help.open || newProj.open || menu.open || searchBox.open || ioBox.open || !!askData || !!promptData || findBar.open
     function closePopups() {
         if (askData) { askData = null; return; }
         if (promptData) { promptData = null; return; }
         if (menu.open) { menu.open = false; return; }
-        setMenu.open = themeMenu.open = quick.open = gotoBox.open = help.open = newProj.open = false;
+        setMenu.open = themeMenu.open = quick.open = gotoBox.open = help.open = newProj.open = searchBox.open = ioBox.open = false;
         if (findBar.open) { findBar.open = false; if (curEd) curEd.query = ""; }
         focusEd();
     }
@@ -728,11 +847,14 @@ Window {
                 anchors.right: parent.right; anchors.rightMargin: 10; height: parent.height; spacing: 3
                 HeadBtn { id: runBtn; anchors.verticalCenter: parent.verticalCenter; glyph: "\u{F040A}"; tint: pal.light; tip: "запустить · F5"; onClicked: win.run(false) }
                 HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "󰣪"; tip: "собрать · Ctrl+Shift+B"; onClicked: win.run(true) }
+                HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "\u{F030C}"; on: ioBox.open || (!!win.curEd && win.ioFor(win.runKey(win.curEd)).on && win.ioFor(win.runKey(win.curEd)).input !== "" && cfg.runIO !== "")
+                          tip: "ввод и аргументы · Ctrl+Shift+R"; onClicked: ioBox.open ? win.closePopups() : ioBox.show() }
                 HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "\u{F04DB}"; tint: win.red; tip: "стоп · Shift+F5"; onClicked: win.stop() }
                 Item { width: 8; height: 1 }
                 HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "󰙅"; on: cfg.sideOpen; tip: "проект · Ctrl+B"; onClicked: cfg.sideOpen = !cfg.sideOpen }
                 HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "\u{F018D}"; on: termPanel.open; tip: "терминал · Ctrl+J"; onClicked: termPanel.open = !termPanel.open }
                 HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "\u{F0349}"; on: findBar.open; tip: "поиск · Ctrl+F"; onClicked: findBar.open ? win.closePopups() : findBar.show(false) }
+                HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "\u{F0968}"; on: searchBox.open; tip: "поиск по проекту · Ctrl+Shift+F"; onClicked: searchBox.open ? win.closePopups() : searchBox.show() }
                 HeadBtn { id: themeBtn; anchors.verticalCenter: parent.verticalCenter; glyph: "󰏘"; on: themeMenu.open; tip: "тема"; onClicked: { setMenu.open = false; themeMenu.open = !themeMenu.open; } }
                 HeadBtn { id: setBtn; anchors.verticalCenter: parent.verticalCenter; glyph: "󰒓"; on: setMenu.open; tip: "настройки · Ctrl+,"; onClicked: { themeMenu.open = false; setMenu.open = !setMenu.open; } }
                 HeadBtn { anchors.verticalCenter: parent.verticalCenter; glyph: "?"; on: help.open; tip: "клавиши · F1"; onClicked: help.open = !help.open }
@@ -762,25 +884,84 @@ Window {
                 Rectangle { anchors.fill: parent; color: Qt.alpha(pal.panel, 0.55) }
                 Item {
                     width: cfg.sideW; height: parent.height
+                    Row {   // вкладки панели: файлы проекта / структура текущего файла
+                        x: 8; y: 6; spacing: 2
+                        Repeater {
+                            model: [["files", "\u{F0645}  файлы"], ["outline", "\u{F0169}  структура"]]
+                            Rectangle {
+                                required property var modelData
+                                readonly property bool on: cfg.sideTab === modelData[0]
+                                width: stt.implicitWidth + 16; height: 24; radius: 5
+                                color: on ? Qt.alpha(pal.sel, 0.4) : stm.containsMouse ? Qt.alpha(pal.head, 0.95) : "transparent"
+                                Text { id: stt; anchors.centerIn: parent; font.family: win.mono; font.pixelSize: cfg.uiSize - 2; color: parent.on ? pal.light : pal.dim; text: parent.modelData[1] }
+                                MouseArea { id: stm; anchors.fill: parent; hoverEnabled: true; onClicked: { cfg.sideTab = parent.modelData[0]; win.refreshOutline(); } }
+                            }
+                        }
+                    }
+                    Item {
+                        width: parent.width; height: parent.height - 34; y: 34
+                        visible: cfg.sideTab === "outline"
+                        Text {
+                            x: 14; y: 4; width: parent.width - 28; elide: Text.ElideMiddle
+                            font.family: win.mono; font.pixelSize: cfg.uiSize - 1; font.bold: true; color: pal.light
+                            text: win.curEd ? win.curEd.name : "нет файла"
+                        }
+                        ListView {
+                            id: outlineList
+                            x: 6; y: 28; width: parent.width - 12; height: parent.height - y - 6
+                            clip: true; boundsBehavior: Flickable.StopAtBounds
+                            model: win.outline
+                            readonly property int here: { const e = win.curEd; if (!e) return -1; let k = -1; for (let i = 0; i < win.outline.length; i++) if (win.outline[i].line <= e.curLine) k = i; return k; }
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                readonly property var k: ({ 5: ["C", pal.acc], 23: ["S", pal.acc], 10: ["E", pal.acc], 3: ["N", pal.dim], 2: ["N", pal.dim],
+                                                            6: ["m", pal.light], 9: ["m", pal.light], 12: ["f", pal.light], 8: ["v", pal.text], 13: ["v", pal.text],
+                                                            14: ["c", pal.text], 22: ["e", pal.text] })[modelData.kind] || ["·", pal.dim]
+                                width: outlineList.width; height: 24; radius: 5
+                                color: index === outlineList.here ? Qt.alpha(pal.sel, 0.4) : olm.containsMouse ? Qt.alpha(pal.head, 0.9) : "transparent"
+                                Rectangle {
+                                    x: 6 + parent.modelData.depth * 14; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 4
+                                    color: Qt.alpha(parent.k[1], 0.15); border.width: 1; border.color: Qt.alpha(parent.k[1], 0.5)
+                                    Text { anchors.centerIn: parent; font.family: win.mono; font.pixelSize: 10; font.bold: true; color: parent.parent.k[1]; text: parent.parent.k[0] }
+                                }
+                                Text {
+                                    x: 28 + parent.modelData.depth * 14; anchors.verticalCenter: parent.verticalCenter; width: parent.width - x - 40; elide: Text.ElideRight
+                                    font.family: win.mono; font.pixelSize: cfg.uiSize - 1; color: index === outlineList.here ? pal.light : pal.text; text: parent.modelData.name
+                                }
+                                Text { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                                       font.family: win.mono; font.pixelSize: cfg.uiSize - 3; color: pal.faint; text: parent.modelData.line }
+                                MouseArea { id: olm; anchors.fill: parent; hoverEnabled: true; onClicked: if (win.curEd) win.curEd.gotoLine(parent.modelData.line) }
+                            }
+                        }
+                        Text {
+                            visible: !win.outline.length; x: 14; y: 34; width: parent.width - 28; wrapMode: Text.Wrap
+                            font.family: win.mono; font.pixelSize: cfg.uiSize - 2; color: pal.faint
+                            text: !win.curEd ? "открой файл" : win.canComplete(win.curEd.lang) ? "функций и классов пока нет" : "структура — для C++ и Python (нужны clangd / jedi)"
+                        }
+                    }
+                    Item {
+                    width: parent.width; height: parent.height
+                    visible: cfg.sideTab !== "outline"
                     Text {
-                        x: 14; y: 10; width: parent.width - 70; elide: Text.ElideMiddle
+                        x: 14; y: 38; width: parent.width - 70; elide: Text.ElideMiddle
                         font.family: win.mono; font.pixelSize: cfg.uiSize - 1; font.bold: true; color: pal.light
                         text: cfg.project ? win.baseName(cfg.project).toUpperCase() : "НЕТ ПРОЕКТА"
                     }
                     Row {
-                        anchors.right: parent.right; anchors.rightMargin: 8; y: 6; spacing: 2
+                        anchors.right: parent.right; anchors.rightMargin: 8; y: 34; spacing: 2
                         HeadBtn { glyph: "󰝒"; tip: "новый файл"; visible: !!cfg.project; onClicked: win.prompt("Новый файл в проекте", "", n => win.createFile(cfg.project + "/" + n)) }
                         HeadBtn { glyph: "󰉋"; tip: "открыть папку · Ctrl+Shift+O"; onClicked: folderDlg.open() }
                         HeadBtn { glyph: "󰘦"; tip: "свернуть всё"; visible: !!cfg.project; onClicked: { win.expanded = {}; win.treeRev++; cfg.expanded = "{}"; } }
                     }
                     Text {
-                        x: 14; y: 30; width: parent.width - 28; elide: Text.ElideMiddle
+                        x: 14; y: 58; width: parent.width - 28; elide: Text.ElideMiddle
                         font.family: win.mono; font.pixelSize: cfg.uiSize - 3; color: pal.faint
                         text: win.short(cfg.project) + (win.cmakeExe ? "  · cmake" : "")
                     }
                     Flickable {
                         id: treeFlick
-                        x: 6; y: 52; width: parent.width - 12; height: parent.height - y - 6
+                        x: 6; y: 80; width: parent.width - 12; height: parent.height - y - 6
                         contentHeight: treeLoader.height; clip: true; boundsBehavior: Flickable.StopAtBounds
                         Loader {
                             id: treeLoader
@@ -793,6 +974,7 @@ Window {
                             Btn { anchors.horizontalCenter: parent.horizontalCenter; label: "󰉋  открыть папку"; onClicked: folderDlg.open() }
                             Btn { anchors.horizontalCenter: parent.horizontalCenter; label: "󰐕  новый проект"; accent: true; onClicked: newProj.show() }
                         }
+                    }
                     }
                 }
                 Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Qt.alpha(pal.acc, 0.2) }
@@ -824,7 +1006,7 @@ Window {
                             title: model.title
                             width: edArea.width; height: edArea.height
                             visible: index === win.cur
-                            onEdited: if (index === win.cur) checkTimer.restart()
+                            onEdited: if (index === win.cur) { checkTimer.restart(); if (cfg.sideTab === "outline") outlineTimer.restart(); }
                         }
                     }
                     // смена вкладки: редактор слегка выезжает
@@ -884,6 +1066,7 @@ Window {
                     property bool repl: false
                     function show(r) {
                         if (!win.curEd) return;
+                        win.curEd.unfoldAll();   // искать и в свёрнутом
                         repl = r; open = true;
                         if (win.curEd.selLen > 0 && win.curEd.area.selectedText.indexOf("\n") < 0) findField.input.text = win.curEd.area.selectedText;
                         findField.input.forceActiveFocus(); findField.input.selectAll();
@@ -937,7 +1120,7 @@ Window {
                     Rectangle { y: 1; width: parent.width; height: parent.height - 1; color: Qt.alpha(pal.bg, 0.6) }
                     Text {
                         x: 14; y: 6; font.family: win.mono; font.pixelSize: cfg.uiSize - 2; textFormat: Text.StyledText; color: pal.dim
-                        text: "<b><font color='" + pal.acc + "'>TERM</font></b> // " + win.short(cfg.project || win.home)
+                        text: "<b><font color='" + pal.acc + "'>TERM</font></b> // " + win.short(cfg.project || win.home) + "<font color='" + pal.faint + "'>   · Ctrl+клик по ошибке — к строке</font>"
                     }
                     Row {
                         anchors.right: parent.right; anchors.rightMargin: 8; y: 2; spacing: 2
@@ -955,6 +1138,24 @@ Window {
                                 function send(s) { ses.sendText(s); }
                                 function busy() { const fg = ses.foregroundProcessName; return !!fg && fg !== (ses.shellProgram || "zsh").split("/").pop(); }
                                 function focusTerm() { term.forceActiveFocus(); }
+                                function lineAt(p) {   // строка терминала под точкой: тройной клик выделяет её, копия идёт через буфер (потом он восстанавливается)
+                                    const cw = term.width / term.columns, ch = term.height / term.lines;
+                                    const x = Math.floor(p.x / cw) * cw + cw / 2, y = Math.floor(p.y / ch) * ch + ch / 2;
+                                    clipBridge.text = ""; clipBridge.paste(); const saved = clipBridge.text;
+                                    term.simulateMouseDoubleClick(x, y, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier);
+                                    term.simulateMousePress(x, y, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier);
+                                    term.simulateMouseRelease(x, y, Qt.LeftButton, Qt.NoButton, Qt.NoModifier);
+                                    term.copyClipboard();
+                                    clipBridge.text = ""; clipBridge.paste(); const line = clipBridge.text.split("\n")[0];
+                                    if (saved) { clipBridge.text = saved; clipBridge.selectAll(); clipBridge.copy(); }
+                                    unselect.at = Qt.point(x, y); unselect.restart();
+                                    return line;
+                                }
+                                Timer {   // снять выделение строки; раньше нельзя — клик засчитается как четвёртый в серии
+                                    id: unselect; property point at; interval: 500
+                                    onTriggered: { term.simulateMousePress(at.x, at.y, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier);
+                                                   term.simulateMouseRelease(at.x, at.y, Qt.LeftButton, Qt.NoButton, Qt.NoModifier); }
+                                }
                                 QMLTermWidget {
                                     id: term
                                     anchors.fill: parent
@@ -965,6 +1166,7 @@ Window {
                                     Component.onCompleted: ses.startShellProgram()
                                     Keys.onPressed: e => { if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_J) { termPanel.open = false; win.focusEd(); e.accepted = true; } }
                                     TapHandler { onPressedChanged: if (pressed) term.forceActiveFocus() }   // сам виджет фокус по клику не берёт
+                                    TapHandler { acceptedModifiers: Qt.ControlModifier; onTapped: ev => win.openFromTerm(tw.lineAt(ev.position)) }
                                 }
                                 Timer {   // шелл загрузился → можно слать ожидающую команду
                                     interval: 150; repeat: true; running: !tw.ready
@@ -1054,7 +1256,7 @@ Window {
         // ══════ всплывающие панели ══════
         MouseArea {   // клик мимо панели — закрыть
             anchors.fill: parent; z: 45
-            enabled: setMenu.open || themeMenu.open || quick.open || gotoBox.open || help.open || newProj.open || menu.open
+            enabled: setMenu.open || themeMenu.open || quick.open || gotoBox.open || help.open || newProj.open || menu.open || searchBox.open || ioBox.open
             onClicked: win.closePopups()
         }
 
@@ -1105,6 +1307,7 @@ Window {
                 Row2 { label: "отступ"; Chips { value: cfg.tabWidth; options: [[2, "2"], [4, "4"], [8, "8"]]; onPicked: v => cfg.tabWidth = v } }
                 Row2 { label: "стандарт C++"; Chips { value: cfg.std; options: [["c++17", "17"], ["c++20", "20"], ["c++23", "23"]]; onPicked: v => { cfg.std = v; win.check(win.curEd); } } }
                 Row2 { label: "закрывать скобки и кавычки"; Toggle { checked: cfg.autoClose; onToggled: v => cfg.autoClose = v } }
+                Row2 { label: "автосохранение"; Toggle { checked: cfg.autoSave; onToggled: v => cfg.autoSave = v } }
                 Row2 { label: "автодополнение (clangd / jedi)"; Toggle { checked: cfg.complete; onToggled: v => cfg.complete = v } }
                 Row2 { label: "ошибки на лету"; Toggle { checked: cfg.liveCheck; onToggled: v => { cfg.liveCheck = v; win.check(win.curEd); } } }
                 Row2 { label: "скрытые файлы в проекте"; Toggle { checked: cfg.hidden; onToggled: v => cfg.hidden = v } }
@@ -1171,7 +1374,7 @@ Window {
         Pop {   // клавиши
             id: help
             anchors.centerIn: parent
-            width: Math.min(parent.width - 60, 860); height: Math.min(parent.height - 60, 560)
+            width: Math.min(parent.width - 60, 1000); height: Math.min(parent.height - 60, 640)
             Text { font.family: win.mono; font.pixelSize: cfg.uiSize + 1; font.bold: true; color: pal.light; text: "клавиши" }
             Flow {
                 y: 34; width: parent.width; height: parent.height - 34; flow: Flow.TopToBottom; spacing: 2
@@ -1182,18 +1385,111 @@ Window {
                         ["Alt+1..9", "вкладка по номеру"], ["Ctrl+P", "найти файл в проекте"], ["Ctrl+G", "перейти к строке"], ["Ctrl+F / Ctrl+H", "поиск / замена"],
                         ["F3 / Shift+F3", "следующее / предыдущее"], ["F5", "запустить"], ["Ctrl+Shift+B", "собрать"], ["Shift+F5", "остановить"],
                         ["F8", "следующая ошибка"], ["Ctrl+J", "терминал"], ["Ctrl+B", "панель проекта"],
-                        ["Ctrl+/", "закомментировать"], ["Ctrl+D", "дублировать строку"], ["Ctrl+Shift+K", "удалить строку"], ["Alt+↑ / ↓", "двигать строки"],
+                        ["Ctrl+Shift+F", "поиск по проекту"], ["Ctrl+Shift+R", "ввод и аргументы запуска"], ["Ctrl+Shift+E", "структура файла"],
+                        ["F12 / Ctrl+клик", "к определению"], ["F2", "переименовать везде"], ["Shift+Alt+F", "форматировать"],
+                        ["F9 / Ctrl+F9", "свернуть блок / всё"], ["Shift+F9", "развернуть всё"], ["Ctrl+D", "ещё курсор: то же слово"], ["Alt+клик", "ещё курсор"],
+                        ["слово + Tab", "шаблон: for, if, main, cout…"], ["Ctrl+Shift+Space", "подсказка параметров"],
+                        ["Ctrl+/", "закомментировать"], ["Ctrl+Shift+D", "дублировать строку"], ["Ctrl+Shift+K", "удалить строку"], ["Alt+↑ / ↓", "двигать строки"],
                         ["Ctrl+L", "выделить строку"], ["Tab / Shift+Tab", "отступ / убрать"], ["Ctrl+] / [", "отступ строк"], ["Ctrl+Enter", "новая строка ниже"],
                         ["Ctrl+Z / Ctrl+Y", "отменить / вернуть"], ["Ctrl+Space", "автодополнение"], ["Home", "к началу кода"], ["Ctrl+= / − / 0", "размер шрифта"], ["Ctrl+колесо", "размер шрифта"],
                         ["Ctrl+,", "настройки"], ["F11", "полный экран"], ["Esc", "закрыть панель"]
                     ]
                     Item {
                         required property var modelData
-                        width: (help.width - 40) / 2; height: 26
+                        width: (help.width - 40) / 2; height: 24
                         Text { width: 170; anchors.verticalCenter: parent.verticalCenter; font.family: win.mono; font.pixelSize: cfg.uiSize - 1; color: pal.acc; text: parent.modelData[0] }
                         Text { x: 176; anchors.verticalCenter: parent.verticalCenter; font.family: win.mono; font.pixelSize: cfg.uiSize - 1; color: pal.text; text: parent.modelData[1] }
                     }
                 }
+            }
+        }
+
+        Pop {   // поиск по проекту
+            id: searchBox
+            function show() { open = true; searchField.input.forceActiveFocus(); searchField.input.selectAll();
+                              const e = win.curEd; if (e && e.selLen > 0 && e.area.selectedText.indexOf("\n") < 0) searchField.input.text = e.area.selectedText; }
+            anchors.horizontalCenter: parent.horizontalCenter; y: bar.height + 30
+            width: Math.min(820, parent.width - 80); height: Math.min(520, parent.height - 90)
+            Field { id: searchField; width: parent.width; hint: "текст во всех файлах " + win.short(win.searchRoot) + "…"
+                    onChanged: searchTimer.restart()
+                    onAccepted: { const h = win.hits[hitList.currentIndex]; if (h) win.openHit(h); }
+                    onDownPressed: hitList.incrementCurrentIndex()
+                    onUpPressed: hitList.decrementCurrentIndex() }
+            Text { y: 36; font.family: win.mono; font.pixelSize: cfg.uiSize - 2; color: pal.faint
+                   text: !win.hitsFor ? "" : win.hits.length ? "найдено: " + win.hits.length + (win.hits.length >= 400 ? "+" : "") + " · Enter — открыть" : "ничего не нашлось" }
+            ListView {
+                id: hitList
+                y: 56; width: parent.width; height: parent.height - 56; clip: true
+                highlightMoveDuration: 80
+                model: win.hits
+                onModelChanged: currentIndex = 0
+                highlight: Rectangle { radius: 6; color: Qt.alpha(pal.sel, 0.4); Rectangle { width: 2; height: parent.height; color: pal.acc } }
+                section.property: "file"
+                section.delegate: Text { required property string section; topPadding: 6; leftPadding: 6; font.family: win.mono; font.pixelSize: cfg.uiSize - 1
+                                         textFormat: Text.StyledText; color: pal.light
+                                         text: "<font color='" + win.iconColor(win.baseName(section)) + "'>" + win.iconFor(win.baseName(section)) + "</font>  " + section }
+                delegate: Item {
+                    required property var modelData
+                    required property int index
+                    width: hitList.width; height: 24
+                    Text { x: 22; width: 50; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight
+                           font.family: win.mono; font.pixelSize: cfg.uiSize - 2; color: pal.faint; text: parent.modelData.line }
+                    Text {
+                        x: 82; width: parent.width - 90; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
+                        font.family: win.mono; font.pixelSize: cfg.uiSize - 1; textFormat: Text.StyledText; color: pal.text
+                        function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+                        text: { const t = parent.modelData.text, q = win.hitsFor, i = t.toLowerCase().indexOf(q.toLowerCase());
+                                return i < 0 ? esc(t) : esc(t.slice(0, i)) + "<b><font color='" + pal.light + "'>" + esc(t.slice(i, i + q.length)) + "</font></b>" + esc(t.slice(i + q.length)); }
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: win.openHit(parent.modelData) }
+                }
+            }
+        }
+
+        Pop {   // ввод и аргументы запуска
+            id: ioBox
+            property string key: ""
+            function show() {
+                const e = win.curEd;
+                if (!e || !e.path) { win.toast("сначала открой и сохрани файл с программой", "warn"); return; }
+                key = win.runKey(e);
+                const io = win.ioFor(key);
+                ioInput.text = io.input; ioArgs.input.text = io.args; ioOn.checked = io.on;
+                open = true; ioInput.forceActiveFocus();
+            }
+            function store() { win.setIO(key, { input: ioInput.text, args: ioArgs.input.text.trim(), on: ioOn.checked }); }
+            anchors.centerIn: parent
+            width: Math.min(560, parent.width - 60); height: Math.min(470, parent.height - 60)
+            Text { font.family: win.mono; font.pixelSize: cfg.uiSize + 1; font.bold: true; color: pal.light
+                   text: "ввод и аргументы · " + (ioBox.key === cfg.project ? win.baseName(cfg.project) + " (cmake)" : win.baseName(ioBox.key)) }
+            Text { y: 24; width: parent.width; wrapMode: Text.Wrap; font.family: win.mono; font.pixelSize: cfg.uiSize - 2; color: pal.faint
+                   text: "Этот текст подаётся программе вместо набора с клавиатуры (std::cin, input()) при каждом запуске F5." }
+            Row2 { y: 62; label: "подавать ввод при запуске"; Toggle { id: ioOn; onToggled: v => { checked = v; ioBox.store(); } } }
+            Rectangle {
+                y: 98; width: parent.width; height: parent.height - y - 120; radius: 6
+                color: Qt.alpha(pal.head, 0.9); border.width: 1; border.color: Qt.alpha(pal.acc, ioInput.activeFocus ? 0.75 : 0.25)
+                Flickable {
+                    id: ioFlick
+                    anchors.fill: parent; anchors.margins: 8; clip: true
+                    contentHeight: ioInput.implicitHeight; boundsBehavior: Flickable.StopAtBounds
+                    TextEdit {
+                        id: ioInput
+                        width: ioFlick.width; font.family: cfg.font; font.pixelSize: cfg.fontSize - 1; color: pal.text
+                        selectionColor: pal.sel; selectedTextColor: pal.text; selectByMouse: true
+                        onTextChanged: if (ioBox.open) ioBox.store()
+                        onCursorRectangleChanged: { if (cursorRectangle.y < ioFlick.contentY) ioFlick.contentY = cursorRectangle.y;
+                                                    else if (cursorRectangle.y + cursorRectangle.height > ioFlick.contentY + ioFlick.height) ioFlick.contentY = cursorRectangle.y + cursorRectangle.height - ioFlick.height; }
+                        Keys.onEscapePressed: win.closePopups()
+                        Text { visible: !ioInput.text; font: ioInput.font; color: pal.faint; text: "5\n1 2 3 4 5" }
+                    }
+                }
+            }
+            Text { y: parent.height - 112; font.family: win.mono; font.pixelSize: cfg.uiSize - 1; color: pal.dim; text: "› аргументы командной строки (argv)" }
+            Field { id: ioArgs; y: parent.height - 88; width: parent.width; hint: "например: data.txt --fast"; onChanged: if (ioBox.open) ioBox.store() }
+            Row {
+                anchors.right: parent.right; anchors.bottom: parent.bottom; spacing: 8
+                Btn { label: "очистить"; onClicked: { ioInput.text = ""; ioArgs.input.text = ""; } }
+                Btn { label: "запустить · F5"; accent: true; onClicked: { win.closePopups(); win.run(false); } }
             }
         }
 
