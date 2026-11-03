@@ -1,0 +1,17 @@
+#!/bin/sh
+# Wired Code — редактор кода. wired-code [файл|папка]
+D="$HOME/.local/share/wired-code"; SYS=/usr/lib/qt6/qml/QMLTermWidget
+[ -e "$SYS/qmldir" ] || { notify-send "Wired Code" "нужен qmltermwidget" 2>/dev/null; echo "Wired Code: нужен пакет qmltermwidget" >&2; exit 1; }
+# модуль терминала: системный + схемы цветов Wired. Если стоит Wired Term — общий с ним, иначе свой
+Q="$HOME/.local/share/wired-term/qml"
+[ -d "$Q/QMLTermWidget/color-schemes" ] || Q="$D/qml"
+M="$Q/QMLTermWidget"; mkdir -p "$M"
+for f in qmldir libqmltermwidget.so kb-layouts QMLTermScrollbar.qml; do ln -sfn "$SYS/$f" "$M/$f"; done
+export QML_IMPORT_PATH="$Q" QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1
+# автодополнение C++: мост к clangd; его родитель — этот процесс, после exec это сам редактор, с ним мост и завершится
+LSP=""
+if command -v clangd >/dev/null; then
+    LSP="${XDG_RUNTIME_DIR:-/tmp}/wired-code/lsp-$$.port"
+    python3 "$D/lsp.py" "$LSP" &
+fi
+exec /usr/lib/qt6/bin/qml "$D/Code.qml" -- ${LSP:+--lsp "$LSP"} "$@"

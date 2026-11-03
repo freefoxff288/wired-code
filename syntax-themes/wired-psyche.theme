@@ -1,0 +1,173 @@
+{
+ "metadata": {
+  "name": "Wired Psyche",
+  "revision": 1
+ },
+ "text-styles": {
+  "Normal": {
+   "text-color": "#ffe1e1",
+   "selected-text-color": "#ffe1e1"
+  },
+  "Keyword": {
+   "text-color": "#e13c42",
+   "selected-text-color": "#e13c42",
+   "bold": true
+  },
+  "ControlFlow": {
+   "text-color": "#e13c42",
+   "selected-text-color": "#e13c42",
+   "bold": true
+  },
+  "Function": {
+   "text-color": "#eedb8b",
+   "selected-text-color": "#eedb8b"
+  },
+  "BuiltIn": {
+   "text-color": "#f47bda",
+   "selected-text-color": "#f47bda",
+   "bold": true
+  },
+  "Variable": {
+   "text-color": "#ffe1e1",
+   "selected-text-color": "#ffe1e1"
+  },
+  "Operator": {
+   "text-color": "#ff8e92",
+   "selected-text-color": "#ff8e92"
+  },
+  "DataType": {
+   "text-color": "#ff8e92",
+   "selected-text-color": "#ff8e92",
+   "bold": true
+  },
+  "Extension": {
+   "text-color": "#eedb8b",
+   "selected-text-color": "#eedb8b"
+  },
+  "Preprocessor": {
+   "text-color": "#aedd88",
+   "selected-text-color": "#aedd88"
+  },
+  "Import": {
+   "text-color": "#aedd88",
+   "selected-text-color": "#aedd88"
+  },
+  "Attribute": {
+   "text-color": "#aedd88",
+   "selected-text-color": "#aedd88"
+  },
+  "String": {
+   "text-color": "#a38cd9",
+   "selected-text-color": "#a38cd9"
+  },
+  "VerbatimString": {
+   "text-color": "#a38cd9",
+   "selected-text-color": "#a38cd9"
+  },
+  "SpecialString": {
+   "text-color": "#a38cd9",
+   "selected-text-color": "#a38cd9",
+   "bold": true
+  },
+  "Char": {
+   "text-color": "#a38cd9",
+   "selected-text-color": "#a38cd9"
+  },
+  "SpecialChar": {
+   "text-color": "#8de2e0",
+   "selected-text-color": "#8de2e0"
+  },
+  "DecVal": {
+   "text-color": "#8de2e0",
+   "selected-text-color": "#8de2e0"
+  },
+  "BaseN": {
+   "text-color": "#8de2e0",
+   "selected-text-color": "#8de2e0"
+  },
+  "Float": {
+   "text-color": "#8de2e0",
+   "selected-text-color": "#8de2e0"
+  },
+  "Constant": {
+   "text-color": "#8de2e0",
+   "selected-text-color": "#8de2e0",
+   "bold": true
+  },
+  "Comment": {
+   "text-color": "#b25c60",
+   "selected-text-color": "#b25c60",
+   "italic": true
+  },
+  "Documentation": {
+   "text-color": "#b25c60",
+   "selected-text-color": "#b25c60",
+   "italic": true
+  },
+  "Annotation": {
+   "text-color": "#b25c60",
+   "selected-text-color": "#b25c60"
+  },
+  "CommentVar": {
+   "text-color": "#ff8e92",
+   "selected-text-color": "#ff8e92",
+   "italic": true
+  },
+  "RegionMarker": {
+   "text-color": "#b25c60",
+   "selected-text-color": "#b25c60"
+  },
+  "Information": {
+   "text-color": "#ff8e92",
+   "selected-text-color": "#ff8e92"
+  },
+  "Warning": {
+   "text-color": "#e8b85e",
+   "selected-text-color": "#e8b85e"
+  },
+  "Alert": {
+   "text-color": "#e8607e",
+   "selected-text-color": "#e8607e",
+   "bold": true
+  },
+  "Error": {
+   "text-color": "#e8607e",
+   "selected-text-color": "#e8607e",
+   "underline": true
+  },
+  "Others": {
+   "text-color": "#ffe1e1",
+   "selected-text-color": "#ffe1e1"
+  }
+ },
+ "editor-colors": {
+  "BackgroundColor": "#120203",
+  "TextSelection": "#961214",
+  "CurrentLine": "#1d0405",
+  "SearchHighlight": "#400b0e",
+  "ReplaceHighlight": "#400b0e",
+  "BracketMatching": "#400b0e",
+  "TabMarker": "#280709",
+  "IndentationLine": "#280709",
+  "IconBorder": "#120203",
+  "LineNumbers": "#b25c60",
+  "CurrentLineNumber": "#ff8e92",
+  "Separator": "#280709",
+  "CodeFolding": "#1d0405",
+  "SpellChecking": "#e8607e",
+  "WordWrapMarker": "#280709",
+  "MarkBookmark": "#e13c42",
+  "MarkBreakpointActive": "#e8607e",
+  "MarkBreakpointReached": "#e8b85e",
+  "MarkBreakpointDisabled": "#b25c60",
+  "MarkExecution": "#ff8e92",
+  "MarkWarning": "#e8b85e",
+  "MarkError": "#e8607e",
+  "ModifiedLines": "#e13c42",
+  "SavedLines": "#ff8e92",
+  "TemplateBackground": "#1d0405",
+  "TemplatePlaceholder": "#280709",
+  "TemplateFocusedPlaceholder": "#400b0e",
+  "TemplateReadOnlyPlaceholder": "#1d0405"
+ }
+}

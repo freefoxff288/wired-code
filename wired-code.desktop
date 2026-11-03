@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Wired Code
+GenericName=Редактор кода
+GenericName[en]=Code Editor
+Comment=Редактор кода в стиле Wired: C++ и Python
+Comment[en]=Wired-styled code editor for C++ and Python
+Exec=@BIN@ %F
+Icon=@ICON@
+Categories=Development;IDE;TextEditor;
+MimeType=text/plain;text/x-c++src;text/x-c++hdr;text/x-csrc;text/x-chdr;text/x-python;text/x-python3;text/x-cmake;text/markdown;
+Keywords=code;editor;c++;python;ide;
+StartupNotify=false
