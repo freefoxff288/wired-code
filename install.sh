@@ -17,7 +17,7 @@ command -v clang-format >/dev/null || echo "clang-format не найден — �
 python3 -c "import black" 2>/dev/null || command -v black >/dev/null || echo "black не найден — форматирования Python не будет (sudo pacman -S python-black)"
 command -v cmake >/dev/null || echo "cmake не найден — проекты C++ с CMakeLists.txt не соберутся (sudo pacman -S cmake)"
 
-mkdir -p "$D/tests" "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/org.kde.syntax-highlighting/themes"
+mkdir -p "$D/tests" "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/org.kde.syntax-highlighting/themes" "$HOME/.local/share/org.kde.syntax-highlighting/syntax"
 cp Code.qml Editor.qml TreeNode.qml ToolTipBox.qml lsp.py runner.py icon.svg "$D/"
 cp tests/editor_test.qml "$D/tests/"
 # темы: если стоит рабочий стол D3R (d3r-themes) — ссылка на общий файл, иначе своя копия
@@ -25,6 +25,7 @@ if [ -f "$HOME/.local/share/d3r-themes/themes.js" ]; then ln -sfn ../d3r-themes/
 mkdir -p "$D/qml/QMLTermWidget/color-schemes"
 cp colorschemes/*.colorscheme "$D/qml/QMLTermWidget/color-schemes/"
 cp -n syntax-themes/*.theme "$HOME/.local/share/org.kde.syntax-highlighting/themes/" 2>/dev/null || true
+cp syntax/*.xml "$HOME/.local/share/org.kde.syntax-highlighting/syntax/"   # C++ как в VS: функции, переменные, типы, макросы
 install -m 755 d3r-code "$HOME/.local/bin/d3r-code"
 # в ярлыке полные пути: у Plasma в PATH нет ~/.local/bin
 sed "s|@BIN@|$HOME/.local/bin/d3r-code|; s|@ICON@|$D/icon.svg|" d3r-code.desktop > "$HOME/.local/share/applications/d3r-code.desktop"

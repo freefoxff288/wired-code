@@ -22,6 +22,20 @@ Window {
     title: (curEd ? (curEd.dirty ? "● " : "") + curEd.name + " — " : "") + "D3R Code"
 
     readonly property string mono: "FiraCode Nerd Font Mono"
+    // шрифты для кода: [семейство, подпись]; Nerd-версия первой (в ней значки), показываются только установленные
+    readonly property var codeFonts: {
+        const all = Qt.fontFamilies(), seen = {}, out = [];
+        for (const f of [["FiraCode Nerd Font Mono", "Fira Code"], ["Fira Code", "Fira Code"], ["JetBrainsMono Nerd Font Mono", "JetBrains Mono"],
+                         ["JetBrains Mono", "JetBrains Mono"], ["CaskaydiaCove Nerd Font Mono", "Cascadia Code"], ["Cascadia Code", "Cascadia Code"],
+                         ["Hack Nerd Font Mono", "Hack"], ["Hack", "Hack"], ["Iosevka Nerd Font Mono", "Iosevka"], ["VictorMono Nerd Font Mono", "Victor Mono"],
+                         ["SauceCodePro Nerd Font Mono", "Source Code Pro"], ["Source Code Pro", "Source Code Pro"], ["UbuntuMono Nerd Font Mono", "Ubuntu Mono"],
+                         ["GeistMono Nerd Font Mono", "Geist Mono"], ["CommitMono Nerd Font Mono", "Commit Mono"], ["0xProto Nerd Font Mono", "0xProto"],
+                         ["Intel One Mono", "Intel One"], ["MesloLGS Nerd Font Mono", "Meslo"], ["FantasqueSansM Nerd Font Mono", "Fantasque"],
+                         ["DejaVu Sans Mono", "DejaVu"], ["Liberation Mono", "Liberation"], ["Adwaita Mono", "Adwaita"]])
+            if (!seen[f[1]] && all.indexOf(f[0]) >= 0) { seen[f[1]] = true; out.push(f); }
+        out.push(["monospace", "системный"]);
+        return out;
+    }
     readonly property string home: StandardPaths.writableLocation(StandardPaths.HomeLocation).toString().replace("file://", "")
     readonly property string runDir: (StandardPaths.writableLocation(StandardPaths.RuntimeLocation).toString().replace("file://", "") || "/tmp") + "/d3r-code"
     readonly property bool maxed: visibility === Window.Maximized || visibility === Window.FullScreen
@@ -1310,9 +1324,22 @@ Window {
                 id: setCol
                 width: parent.width
                 Text { font.family: win.mono; font.pixelSize: cfg.uiSize - 1; color: pal.dim; text: "› вид"; bottomPadding: 4 }
-                Row2 { label: "шрифт кода"; Chips { value: cfg.font; onPicked: v => cfg.font = v
-                        options: ["FiraCode Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "Hack Nerd Font Mono", "monospace"]
-                                 .filter(f => f === "monospace" || Qt.fontFamilies().indexOf(f) >= 0).map(f => [f, f.split(" ")[0].replace("monospace", "mono")]) } }
+                Row2 { label: "шрифт кода" }
+                Flow {   // установленные шрифты для кода, каждый — своим начертанием
+                    width: parent.width; spacing: 4; bottomPadding: 6
+                    Repeater {
+                        model: win.codeFonts
+                        Rectangle {
+                            required property var modelData
+                            readonly property bool on: cfg.font === modelData[0]
+                            width: fl.implicitWidth + 14; height: 24; radius: 4
+                            color: on ? Qt.alpha(pal.sel, 0.6) : fm.containsMouse ? Qt.alpha(pal.btn, 0.9) : Qt.alpha(pal.head, 0.9)
+                            border.width: 1; border.color: Qt.alpha(pal.acc, on ? 0.7 : 0.25)
+                            Text { id: fl; anchors.centerIn: parent; font.family: parent.modelData[0]; font.pixelSize: cfg.uiSize - 1; color: parent.on ? pal.light : pal.text; text: parent.modelData[1] }
+                            MouseArea { id: fm; anchors.fill: parent; hoverEnabled: true; onClicked: cfg.font = parent.modelData[0] }
+                        }
+                    }
+                }
                 Row2 { label: "размер кода"; Stepper { value: cfg.fontSize; from: 9; to: 32; suffix: "px"; onMoved: v => cfg.fontSize = v } }
                 Row2 { label: "размер интерфейса"; Stepper { value: cfg.uiSize; from: 10; to: 18; suffix: "px"; onMoved: v => cfg.uiSize = v } }
                 Row2 { label: "непрозрачность"; Stepper { value: Math.round(cfg.opacity * 100); from: 60; to: 100; suffix: "%"; onMoved: v => cfg.opacity = v / 100 } }

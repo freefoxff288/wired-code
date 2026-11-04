@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language [
+  <!ENTITY kw "alignas|alignof|and|and_eq|asm|auto|bitand|bitor|bool|break|case|catch|char|char8_t|char16_t|char32_t|class|compl|concept|const|consteval|constexpr|constinit|const_cast|continue|co_await|co_return|co_yield|decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|extern|false|float|for|friend|goto|if|inline|int|long|mutable|namespace|new|noexcept|not|not_eq|nullptr|operator|or|or_eq|private|protected|public|register|reinterpret_cast|requires|return|short|signed|sizeof|static|static_assert|static_cast|struct|switch|template|this|thread_local|throw|true|try|typedef|typeid|typename|union|unsigned|using|virtual|void|volatile|wchar_t|while|xor|xor_eq|final|override|size_t|defined|include|define|ifdef|ifndef|endif|pragma|elif|undef|error">
+  <!ENTITY std "std|string|string_view|vector|array|map|unordered_map|set|unordered_set|multimap|multiset|list|deque|queue|priority_queue|stack|pair|tuple|optional|variant|any|function|shared_ptr|unique_ptr|weak_ptr|ostream|istream|iostream|ifstream|ofstream|fstream|stringstream|istringstream|ostringstream|thread|mutex|atomic|span|bitset|complex|regex|chrono">
+]>
+<!-- D3R C++: стандартная подсветка C++ (KDE) + то, чего в ней нет, как в Visual Studio:
+     вызовы функций, переменные, типы и пространства имён, МАКРОСЫ. Строки, комментарии, #include и ключевые
+     слова остаются за ##C++ — свои правила стоят первыми, но пропускают ключевые слова (lookahead). -->
+<language name="D3R C++" section="Sources" version="1" kateversion="5.79" priority="20"
+          extensions="*.cpp;*.cxx;*.cc;*.c++;*.hpp;*.hxx;*.hh;*.h;*.ino;*.ipp;*.tpp" mimetype="text/x-c++src;text/x-c++hdr" license="MIT">
+  <highlighting>
+    <contexts>
+      <context name="Main" attribute="Normal" lineEndContext="#stay">
+        <!-- std::, ns:: — как тип -->
+        <RegExpr attribute="Type" String="\b[A-Za-z_]\w*(?=\s*::)"/>
+        <!-- имя перед ( — функция (кроме ключевых слов и типов) -->
+        <RegExpr attribute="Function" String="\b(?!(?:&kw;)\b)[A-Za-z_]\w*(?=\s*(?:&lt;[^;()&lt;&gt;]*&gt;\s*)?\()"/>
+        <!-- МАКРОС / КОНСТАНТА -->
+        <RegExpr attribute="Macro" String="\b[A-Z][A-Z0-9_]{1,}\b(?![a-z])"/>
+        <!-- типы стандартной библиотеки и свои с заглавной -->
+        <RegExpr attribute="Type" String="\b(?:&std;)\b|\b[A-Z]\w*[a-z]\w*\b"/>
+        <!-- остальные имена — переменные -->
+        <RegExpr attribute="Variable" String="\b(?!(?:&kw;)\b)[A-Za-z_]\w*"/>
+        <IncludeRules context="##C++"/>
+      </context>
+    </contexts>
+    <itemDatas>
+      <itemData name="Normal" defStyleNum="dsNormal"/>
+      <itemData name="Function" defStyleNum="dsFunction"/>
+      <itemData name="Variable" defStyleNum="dsVariable"/>
+      <itemData name="Type" defStyleNum="dsBuiltIn"/>
+      <itemData name="Macro" defStyleNum="dsConstant"/>
+    </itemDatas>
+  </highlighting>
+  <general>
+    <keywords casesensitive="1"/>
+  </general>
+</language>
