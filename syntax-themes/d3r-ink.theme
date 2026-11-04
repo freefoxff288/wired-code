@@ -19,12 +19,12 @@
    "bold": true
   },
   "Function": {
-   "text-color": "#e6e6e6",
-   "selected-text-color": "#e6e6e6"
+   "text-color": "#a6c2dd",
+   "selected-text-color": "#a6c2dd"
   },
   "BuiltIn": {
-   "text-color": "#ffffff",
-   "selected-text-color": "#ffffff",
+   "text-color": "#dca8b9",
+   "selected-text-color": "#dca8b9",
    "bold": true
   },
   "Variable": {
@@ -41,57 +41,57 @@
    "bold": true
   },
   "Extension": {
-   "text-color": "#e6e6e6",
-   "selected-text-color": "#e6e6e6"
+   "text-color": "#a6c2dd",
+   "selected-text-color": "#a6c2dd"
   },
   "Preprocessor": {
-   "text-color": "#8f8f8f",
-   "selected-text-color": "#8f8f8f"
+   "text-color": "#bfaed5",
+   "selected-text-color": "#bfaed5"
   },
   "Import": {
-   "text-color": "#8f8f8f",
-   "selected-text-color": "#8f8f8f"
+   "text-color": "#bfaed5",
+   "selected-text-color": "#bfaed5"
   },
   "Attribute": {
-   "text-color": "#8f8f8f",
-   "selected-text-color": "#8f8f8f"
+   "text-color": "#bfaed5",
+   "selected-text-color": "#bfaed5"
   },
   "String": {
-   "text-color": "#a8a8a8",
-   "selected-text-color": "#a8a8a8"
+   "text-color": "#aecb9a",
+   "selected-text-color": "#aecb9a"
   },
   "VerbatimString": {
-   "text-color": "#a8a8a8",
-   "selected-text-color": "#a8a8a8"
+   "text-color": "#aecb9a",
+   "selected-text-color": "#aecb9a"
   },
   "SpecialString": {
-   "text-color": "#a8a8a8",
-   "selected-text-color": "#a8a8a8",
+   "text-color": "#aecb9a",
+   "selected-text-color": "#aecb9a",
    "bold": true
   },
   "Char": {
-   "text-color": "#a8a8a8",
-   "selected-text-color": "#a8a8a8"
+   "text-color": "#aecb9a",
+   "selected-text-color": "#aecb9a"
   },
   "SpecialChar": {
-   "text-color": "#cfcfcf",
-   "selected-text-color": "#cfcfcf"
+   "text-color": "#dbc194",
+   "selected-text-color": "#dbc194"
   },
   "DecVal": {
-   "text-color": "#cfcfcf",
-   "selected-text-color": "#cfcfcf"
+   "text-color": "#dbc194",
+   "selected-text-color": "#dbc194"
   },
   "BaseN": {
-   "text-color": "#cfcfcf",
-   "selected-text-color": "#cfcfcf"
+   "text-color": "#dbc194",
+   "selected-text-color": "#dbc194"
   },
   "Float": {
-   "text-color": "#cfcfcf",
-   "selected-text-color": "#cfcfcf"
+   "text-color": "#dbc194",
+   "selected-text-color": "#dbc194"
   },
   "Constant": {
-   "text-color": "#cfcfcf",
-   "selected-text-color": "#cfcfcf",
+   "text-color": "#dbc194",
+   "selected-text-color": "#dbc194",
    "bold": true
   },
   "Comment": {
