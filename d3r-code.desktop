@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Wired Code
+Name=D3R Code
 GenericName=Редактор кода
 GenericName[en]=Code Editor
-Comment=Редактор кода в стиле Wired: C++ и Python
-Comment[en]=Wired-styled code editor for C++ and Python
+Comment=Редактор кода в стиле D3R: C++ и Python
+Comment[en]=D3R-styled code editor for C++ and Python
 Exec=@BIN@ %F
 Icon=@ICON@
 Categories=Development;IDE;TextEditor;

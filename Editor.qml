@@ -1,4 +1,4 @@
-// Один открытый файл в Wired Code: текст с подсветкой (KSyntaxHighlighting, темы Wired), номера строк, текущая строка,
+// Один открытый файл в D3R Code: текст с подсветкой (KSyntaxHighlighting, темы D3R), номера строк, текущая строка,
 // парные скобки, поиск, ошибки компилятора на полях. Правки кода (отступы, комментарии, перенос строк) — функции ниже,
 // их зовут хоткеи из Code.qml; набор (Tab, Enter, скобки, Backspace) обрабатывается здесь же в Keys.
 // Ещё здесь: сворачивание блоков, несколько курсоров, шаблоны (сниппеты), подсказка параметров и описание под мышью.
@@ -952,7 +952,7 @@ Item {
     SyntaxHighlighter {
         textEdit: area
         definition: Repository.definitionForFileName(ed.name)
-        theme: Repository.theme("Wired " + ed.app.th.scheme)
+        theme: Repository.theme("D3R " + ed.app.th.scheme)
     }
 
     // тонкие полосы прокрутки

@@ -1,4 +1,4 @@
-// Wired Code — редактор кода в стиле Wired: C++ и Python, проекты, подсветка, встроенный терминал, проверка ошибок на лету.
+// D3R Code — редактор кода в стиле D3R: C++ и Python, проекты, подсветка, встроенный терминал, проверка ошибок на лету.
 // Клавиши (полный список — F1):
 //   Ctrl+N/O/S/Shift+S/W — новый, открыть, сохранить, сохранить как, закрыть · Ctrl+Shift+O — папка · Ctrl+Shift+N — проект
 //   Ctrl+Tab, Alt+1..9 — вкладки · Ctrl+P — быстрый переход к файлу · Ctrl+G — к строке · Ctrl+F/H — поиск/замена
@@ -11,7 +11,7 @@ import QtQuick.Window
 import QtQuick.Dialogs
 import QtCore
 import QMLTermWidget
-import "themes.js" as T   // у Wired-рабочего стола — ссылка на общий ~/.local/share/wired-themes/themes.js
+import "themes.js" as T   // у D3R-рабочего стола — ссылка на общий ~/.local/share/d3r-themes/themes.js
 
 Window {
     id: win
@@ -19,11 +19,11 @@ Window {
     visible: true
     color: "transparent"
     flags: Qt.Window | Qt.FramelessWindowHint
-    title: (curEd ? (curEd.dirty ? "● " : "") + curEd.name + " — " : "") + "Wired Code"
+    title: (curEd ? (curEd.dirty ? "● " : "") + curEd.name + " — " : "") + "D3R Code"
 
     readonly property string mono: "FiraCode Nerd Font Mono"
     readonly property string home: StandardPaths.writableLocation(StandardPaths.HomeLocation).toString().replace("file://", "")
-    readonly property string runDir: (StandardPaths.writableLocation(StandardPaths.RuntimeLocation).toString().replace("file://", "") || "/tmp") + "/wired-code"
+    readonly property string runDir: (StandardPaths.writableLocation(StandardPaths.RuntimeLocation).toString().replace("file://", "") || "/tmp") + "/d3r-code"
     readonly property bool maxed: visibility === Window.Maximized || visibility === Window.FullScreen
     function short(p) { return p && p.startsWith(home) ? "~" + p.slice(home.length) : (p || ""); }
     function quote(p) { return /^[\w@%+=:,.\/~-]+$/.test(p) ? p : "'" + p.replace(/'/g, "'\\''") + "'"; }
@@ -31,10 +31,10 @@ Window {
     function baseName(p) { return p.replace(/\/+$/, "").split("/").pop() || "/"; }
     function stem(p) { return baseName(p).replace(/\.[^.]*$/, ""); }
 
-    // ── настройки: ~/.config/wired-code.conf ──
+    // ── настройки: ~/.config/d3r-code.conf ──
     Settings {
         id: settingsObj
-        location: "file://" + win.home + "/.config/wired-code.conf"
+        location: "file://" + win.home + "/.config/d3r-code.conf"
         property string theme: ""             // "" — как на рабочем столе
         property string font: "FiraCode Nerd Font Mono"
         property int fontSize: 15
@@ -65,7 +65,7 @@ Window {
     }
     readonly property alias cfg: settingsObj
 
-    // ── тема: своя или общая с рабочим столом (~/.config/wired-theme) ──
+    // ── тема: своя или общая с рабочим столом (~/.config/d3r-theme) ──
     property string deskTheme: "wired"
     readonly property string themeId: cfg.theme || deskTheme
     readonly property var th: T.list.find(t => t.id === themeId) || T.list[0]
@@ -78,7 +78,7 @@ Window {
                 const id = (x.responseText || "").trim();
                 if (id && id !== win.deskTheme && T.list.some(t => t.id === id)) win.deskTheme = id;
             };
-            x.open("GET", "file://" + win.home + "/.config/wired-theme"); x.send();
+            x.open("GET", "file://" + win.home + "/.config/d3r-theme"); x.send();
         }
     }
     Item {   // палитра; цвета перетекают при смене темы
@@ -216,6 +216,24 @@ Window {
         });
     }
 
+    // ══════ минуты кода для D3R Study (~/.local/share/d3r-study/code.json): +1, пока окно активно ══════
+    Timer {
+        interval: 60000; repeat: true; running: win.active
+        onTriggered: {
+            const dir = win.home + "/.local/share/d3r-study", f = dir + "/code.json", d = Qt.formatDate(new Date(), "yyyy-MM-dd");
+            win.exec("mkdir -p " + win.quote(dir), () => {
+                const x = new XMLHttpRequest();
+                x.onreadystatechange = () => {
+                    if (x.readyState !== XMLHttpRequest.DONE) return;
+                    let j = {}; try { j = JSON.parse(x.responseText || "{}"); } catch (e) {}
+                    j[d] = (j[d] || 0) + 1;
+                    const w = new XMLHttpRequest(); w.open("PUT", "file://" + f); w.send(JSON.stringify(j));
+                };
+                x.open("GET", "file://" + f); x.send();
+            });
+        }
+    }
+
     // ══════ проверка ошибок на лету: g++ -fsyntax-only / разбор Python ══════
     Timer { id: checkTimer; interval: 1200; onTriggered: win.check(win.curEd) }
     function check(e) {
@@ -282,7 +300,7 @@ Window {
                 cmd = prog("python3 " + quote(e.path.slice(root.length + 1)));
             } else if (/\.sh$/.test(e.name)) cmd = prog("bash " + quote(e.path));
             else { toast("не знаю, как запустить " + e.name, "warn"); return; }
-            const head = "printf '\\033[2m── wired // " + (buildOnly ? "build" : "run") + " " + what.replace(/'/g, "") + (useIn ? " · ввод из сохранённого" : "") + " ──\\033[0m\\n'";
+            const head = "printf '\\033[2m── d3r // " + (buildOnly ? "build" : "run") + " " + what.replace(/'/g, "") + (useIn ? " · ввод из сохранённого" : "") + " ──\\033[0m\\n'";
             const tail = "s=$?; printf '\\n\\033[2m── exit %s%s ──\\033[0m\\n' $s \"$(cat " + quote(stats) + " 2>/dev/null)\"";
             const go = () => { termRun("clear; rm -f " + quote(stats) + "; cd " + quote(root) + " && " + head + "; (" + cmd + "); " + tail); runFx.restart(); };
             runRoot = root;
@@ -508,14 +526,14 @@ Window {
         const args = i >= 0 ? a.slice(i + 1) : [];
         const shotI = args.indexOf("--shot");
         if (shotI >= 0) { shot.file = args[shotI + 1]; args.splice(shotI, 2); shot.start(); }
-        const lspI = args.indexOf("--lsp");   // файл с портом моста к clangd (его запускает wired-code)
+        const lspI = args.indexOf("--lsp");   // файл с портом моста к clangd (его запускает d3r-code)
         if (lspI >= 0) { lspFile = args[lspI + 1]; args.splice(lspI, 2); }
         const actI = args.indexOf("--act");   // самопроверка: открыть панели перед снимком
         if (actI >= 0) { shot.acts = args[actI + 1].split(","); args.splice(actI, 2); }
         if (cfg.project) scanProject();
         for (const p of JSON.parse(cfg.session)) docs.append({ path: p, title: baseName(p) });
         cur = docs.count ? Math.min(cfg.sessionCur, docs.count - 1) : -1;
-        for (const p of args) {   // wired-code <файл|папка>
+        for (const p of args) {   // d3r-code <файл|папка>
             if (!p || p.startsWith("-")) continue;
             const ap = p.startsWith("/") ? p : home + "/" + p;
             if (/\.\w+$/.test(ap) || ap.endsWith("CMakeLists.txt")) openFile(ap); else openProject(ap);
@@ -781,7 +799,7 @@ Window {
                 id: brand
                 x: 16; anchors.verticalCenter: parent.verticalCenter
                 font.family: win.mono; font.pixelSize: 13; textFormat: Text.StyledText; color: pal.dim
-                text: "<b><font color='" + pal.acc + "'>WIRED</font></b> // code"
+                text: "<b><font color='" + pal.acc + "'>D3R</font></b> // code"
             }
             ListView {
                 id: tabRow
@@ -1026,7 +1044,7 @@ Window {
                             Text {
                                 width: parent.width; horizontalAlignment: Text.AlignHCenter
                                 font.family: win.mono; font.pixelSize: 44; font.bold: true; textFormat: Text.StyledText; color: pal.dim
-                                text: "<font color='" + pal.acc + "'>WIRED</font> // code"
+                                text: "<font color='" + pal.acc + "'>D3R</font> // code"
                             }
                             Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.family: win.mono; font.pixelSize: cfg.uiSize; color: pal.faint
                                    text: "let's all love lain · c++ · python" }
@@ -1247,7 +1265,7 @@ Window {
             }
         }
 
-        Canvas {   // строки развёртки, как во всех Wired-окнах (рисуются один раз)
+        Canvas {   // строки развёртки, как во всех D3R-окнах (рисуются один раз)
             anchors.fill: parent; z: 30; visible: cfg.scanlines
             onPaint: { const g = getContext("2d"); g.reset(); g.fillStyle = Qt.rgba(0, 0, 0, 0.09); for (let y = 0; y < height; y += 3) g.fillRect(0, y, width, 1); }
             onHeightChanged: requestPaint()

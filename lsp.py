@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Мост автодополнения Wired Code. QML не умеет говорить с процессом через stdin/stdout, поэтому мост отвечает
+"""Мост автодополнения D3R Code. QML не умеет говорить с процессом через stdin/stdout, поэтому мост отвечает
 редактору по HTTP на 127.0.0.1: C++ — через clangd (LSP по stdio, запускается при первом C++-файле),
 Python — через библиотеку jedi (если установлена: python-jedi). Порт, токен и что доступно пишутся в файл:
 lsp.py <файл-порта> → «порт токен cpp,python».
@@ -17,7 +17,7 @@ import json, os, secrets, shutil, signal, subprocess, sys, threading, time
 from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-STD = os.environ.get("WIRED_CODE_STD", "c++20")
+STD = os.environ.get("D3R_CODE_STD", "c++20")
 
 
 class Clangd:

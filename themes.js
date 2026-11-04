@@ -1,6 +1,6 @@
 .pragma library
-// Темы Wired: палитры интерфейса. Тема подсветки кода — syntax-themes/wired-<id>.theme, терминала — colorschemes/<scheme>.colorscheme.
-// На рабочем столе Wired этот файл — ссылка на общий ~/.local/share/wired-themes/themes.js (одна тема на всё).
+// Темы D3R: палитры интерфейса. Тема подсветки кода — syntax-themes/d3r-<id>.theme, терминала — colorschemes/<scheme>.colorscheme.
+// На рабочем столе D3R этот файл — ссылка на общий ~/.local/share/d3r-themes/themes.js (одна тема на всё).
 var list = [
  {"id": "wired",  "name": "WIRED",  "scheme": "Wired",  "hue": 225, "sat": 1.0,  "wall": "wired.png",
   "bg": "#050b24", "panel": "#0b1233", "head": "#0e1640", "btn": "#16215a", "text": "#dce6ff", "dim": "#5f78b8", "acc": "#6898f7", "light": "#8eb4fb", "sel": "#3056e0"},

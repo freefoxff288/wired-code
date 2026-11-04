@@ -8,7 +8,7 @@ Item {
                property bool lineNumbers: true; property bool curLine: true; property bool autoClose: true; property bool anim: false }
     Item { id: palM; property color bg: "#000"; property color panel: "#111"; property color head: "#222"; property color btn: "#333"; property color text: "#eee"
            property color dim: "#888"; property color acc: "#68f"; property color light: "#9bf"; property color sel: "#35e"; property color faint: "#666" }
-    QtObject { id: appM; property string mono: "monospace"; property var cfg: cfgM; property var pal: palM; property var th: ({ scheme: "Wired" }); function zoom(d) {} function canComplete(l) { return false; } }
+    QtObject { id: appM; property string mono: "monospace"; property var cfg: cfgM; property var pal: palM; property var th: ({ scheme: "D3R" }); function zoom(d) {} function canComplete(l) { return false; } }
     Editor { id: ed; app: appM; title: "t.cpp"; anchors.fill: parent }
 
     property int fails: 0
@@ -80,7 +80,7 @@ Item {
         // замена всего текста (формат): меняется только середина, курсор остаётся у того же кода
         set("int  a;\nint b;", 12); ed.setText("int a;\nint b;"); eq("settext", ed.area.text, "int a;\nint b;"); eq("settext-cur", ed.area.cursorPosition, 11);
         // сохранение: запись + сверка чтением (раньше чтение обгоняло запись и сообщало ложную ошибку)
-        ed.path = "/tmp/wired-code-save-test.py"; ed.loaded = true; set("print('какащке')\n".repeat(5000));
+        ed.path = "/tmp/d3r-code-save-test.py"; ed.loaded = true; set("print('какащке')\n".repeat(5000));
         ed.save(ok => {
             eq("save-ok", ok, true); eq("save-clean", ed.dirty, false)
             console.log(fails ? "EDITOR TEST FAILED: " + fails : "EDITOR TEST OK");
